@@ -6,21 +6,7 @@ import sympy as sp
 
 from utils.errores import error_absoluto, error_relativo
 from utils.graficos import plot_comparacion_barras, plot_funcion
-
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-def _parsear_funcion(expr_str: str):
-    try:
-        x_sym = sp.Symbol("x")
-        expr = sp.sympify(expr_str)
-        f_np = sp.lambdify(x_sym, expr, modules=["numpy"])
-        return expr, f_np, x_sym
-    except (sp.SympifyError, SyntaxError, TypeError) as e:
-        st.error(f"Error al parsear la funcion: {e}")
-        return None, None, None
+from utils.math_keyboard import math_input, parse_latex
 
 
 def _valor_exacto(expr, x_sym, a: float, b: float):
@@ -192,12 +178,13 @@ def _plot_simpson(f_np, a: float, b: float, n: int, resultado: float, nombre: st
 # ---------------------------------------------------------------------------
 
 def _inputs_comunes(key_prefix: str):
+    latex = math_input(
+        label="f(x) =",
+        default_latex="x^{2}+\\sin(x)",
+        key=f"{key_prefix}_func",
+    )
     col1, col2 = st.columns(2)
     with col1:
-        func_str = st.text_input(
-            "Funcion f(x)", value="x**2 + sin(x)", key=f"{key_prefix}_func",
-            help="Ejemplos: x**2, sin(x), exp(x), log(x), x**3 - 2*x",
-        )
         a = st.number_input("Limite inferior (a)", value=0.0, key=f"{key_prefix}_a")
         b = st.number_input("Limite superior (b)", value=2.0, key=f"{key_prefix}_b")
     with col2:
@@ -207,7 +194,7 @@ def _inputs_comunes(key_prefix: str):
                           key=f"{key_prefix}_tol")
     tolerancia = 10 ** (-n_dec)
     st.latex(rf"\text{{Tolerancia}} = 10^{{-{n_dec}}}")
-    return func_str, a, b, int(n), n_dec, tolerancia
+    return latex, a, b, int(n), n_dec, tolerancia
 
 
 def _mostrar_resultados(resultado: float, valor_exacto, n_dec: int,
@@ -306,10 +293,11 @@ def _metodo_rectangulo():
         st.latex(r"E = \frac{(b-a)^3}{24\,n^2}\,f''(\xi)")
         st.markdown("**Restriccion de n:** Ninguna.")
 
-    func_str, a, b, n, n_dec, tol = _inputs_comunes("rect")
+    latex, a, b, n, n_dec, tol = _inputs_comunes("rect")
 
     if st.button("Calcular", key="rect_calc"):
-        expr, f_np, x_sym = _parsear_funcion(func_str)
+        x_sym = sp.Symbol("x")
+        expr, f_np = parse_latex(latex, [x_sym])
         if expr is None:
             return
         valor_exacto = _valor_exacto(expr, x_sym, a, b)
@@ -334,10 +322,11 @@ def _metodo_trapecio():
         st.latex(r"E_T = -\frac{(b-a)^3}{12\,n^2}\,f''(\xi)")
         st.markdown("**Restriccion de n:** Ninguna.")
 
-    func_str, a, b, n, n_dec, tol = _inputs_comunes("trap")
+    latex, a, b, n, n_dec, tol = _inputs_comunes("trap")
 
     if st.button("Calcular", key="trap_calc"):
-        expr, f_np, x_sym = _parsear_funcion(func_str)
+        x_sym = sp.Symbol("x")
+        expr, f_np = parse_latex(latex, [x_sym])
         if expr is None:
             return
         valor_exacto = _valor_exacto(expr, x_sym, a, b)
@@ -361,14 +350,15 @@ def _metodo_simpson13():
         st.latex(r"E = -\frac{(b-a)^5}{180\,n^4}\,f^{(4)}(\xi)")
         st.markdown("**Restriccion de n:** n debe ser **par**.")
 
-    func_str, a, b, n, n_dec, tol = _inputs_comunes("s13")
+    latex, a, b, n, n_dec, tol = _inputs_comunes("s13")
 
     if n % 2 != 0:
         st.warning(f"Simpson 1/3 requiere n par. Se ajusta n = {n} → {n + 1}")
         n = n + 1
 
     if st.button("Calcular", key="s13_calc"):
-        expr, f_np, x_sym = _parsear_funcion(func_str)
+        x_sym = sp.Symbol("x")
+        expr, f_np = parse_latex(latex, [x_sym])
         if expr is None:
             return
         valor_exacto = _valor_exacto(expr, x_sym, a, b)
@@ -397,7 +387,7 @@ def _metodo_simpson38():
         st.latex(r"E = -\frac{(b-a)^5}{6480\,n^4}\,f^{(4)}(\xi)")
         st.markdown("**Restriccion de n:** n debe ser **multiplo de 3**.")
 
-    func_str, a, b, n, n_dec, tol = _inputs_comunes("s38")
+    latex, a, b, n, n_dec, tol = _inputs_comunes("s38")
 
     if n % 3 != 0:
         n_adj = round(n / 3) * 3
@@ -407,7 +397,8 @@ def _metodo_simpson38():
         n = n_adj
 
     if st.button("Calcular", key="s38_calc"):
-        expr, f_np, x_sym = _parsear_funcion(func_str)
+        x_sym = sp.Symbol("x")
+        expr, f_np = parse_latex(latex, [x_sym])
         if expr is None:
             return
         valor_exacto = _valor_exacto(expr, x_sym, a, b)
@@ -432,10 +423,11 @@ def _metodo_simpson38():
 def _comparacion():
     st.subheader("Comparacion de Metodos")
 
-    func_str, a, b, n, n_dec, tol = _inputs_comunes("int_comp")
+    latex, a, b, n, n_dec, tol = _inputs_comunes("int_comp")
 
     if st.button("Comparar", key="int_comp_calc"):
-        expr, f_np, x_sym = _parsear_funcion(func_str)
+        x_sym = sp.Symbol("x")
+        expr, f_np = parse_latex(latex, [x_sym])
         if expr is None:
             return
         valor_exacto = _valor_exacto(expr, x_sym, a, b)

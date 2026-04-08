@@ -15,16 +15,7 @@ from utils.graficos import (
     plot_scatter_3d,
     plot_scatter_montecarlo,
 )
-
-
-def _parsear_funcion(expr_str: str, variables: list[sp.Symbol]):
-    try:
-        expr = sp.sympify(expr_str)
-        f_np = sp.lambdify(variables, expr, modules=["numpy"])
-        return expr, f_np
-    except (sp.SympifyError, SyntaxError, TypeError) as e:
-        st.error(f"Error al parsear la funcion: {e}")
-        return None, None
+from utils.math_keyboard import math_input, parse_latex
 
 
 def _calcular_valor_exacto_1d(expr, x_sym, a, b):
@@ -44,9 +35,9 @@ def _integracion_1d():
     st.latex(r"I = \int_a^b f(x)\,dx \approx \frac{b-a}{N}\sum_{i=1}^{N} f(x_i)")
     st.latex(r"x_i \sim \mathcal{U}(a, b)")
 
+    latex = math_input(label="f(x) =", default_latex="x^{2}+\\sin(x)", key="mc1d_func")
     col1, col2 = st.columns(2)
     with col1:
-        func_str = st.text_input("Funcion f(x)", value="x**2 + sin(x)", key="mc1d_func")
         a = st.number_input("Limite inferior (a)", value=0.0, key="mc1d_a")
         b = st.number_input("Limite superior (b)", value=2.0, key="mc1d_b")
     with col2:
@@ -62,7 +53,7 @@ def _integracion_1d():
 
     if st.button("Calcular", key="mc1d_calc"):
         x_sym = sp.Symbol("x")
-        expr, f_np = _parsear_funcion(func_str, [x_sym])
+        expr, f_np = parse_latex(latex, [x_sym])
         if expr is None:
             return
 
@@ -187,9 +178,9 @@ def _integracion_multidimensional():
     n_dims = st.radio("Dimensiones", [2, 3], horizontal=True, key="mc_nd_dims")
 
     if n_dims == 2:
-        func_str = st.text_input("Funcion f(x, y)", value="x**2 + y**2", key="mc_nd_func")
+        latex = math_input(label="f(x,y) =", default_latex="x^{2}+y^{2}", key="mc_nd_func")
     else:
-        func_str = st.text_input("Funcion f(x, y, z)", value="x**2 + y**2 + z**2", key="mc_nd_func")
+        latex = math_input(label="f(x,y,z) =", default_latex="x^{2}+y^{2}+z^{2}", key="mc_nd_func")
 
     cols = st.columns(n_dims)
     rangos = []
@@ -207,7 +198,7 @@ def _integracion_multidimensional():
 
     if st.button("Calcular", key="mc_nd_calc"):
         simbolos = [sp.Symbol(nombres[i]) for i in range(n_dims)]
-        expr, f_np = _parsear_funcion(func_str, simbolos)
+        expr, f_np = parse_latex(latex, simbolos)
         if expr is None:
             return
 
@@ -264,7 +255,7 @@ def _comparacion_metodos():
 
     st.latex(r"\text{Monte Carlo vs Trapecios vs Simpson}")
 
-    func_str = st.text_input("Funcion f(x)", value="x**2 + sin(x)", key="mc_comp_func")
+    latex = math_input(label="f(x) =", default_latex="x^{2}+\\sin(x)", key="mc_comp_func")
     col1, col2 = st.columns(2)
     with col1:
         a = st.number_input("Limite inferior (a)", value=0.0, key="mc_comp_a")
@@ -277,7 +268,7 @@ def _comparacion_metodos():
 
     if st.button("Comparar", key="mc_comp_calc"):
         x_sym = sp.Symbol("x")
-        expr, f_np = _parsear_funcion(func_str, [x_sym])
+        expr, f_np = parse_latex(latex, [x_sym])
         if expr is None:
             return
 

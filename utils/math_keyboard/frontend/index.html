@@ -1,0 +1,312 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8"/>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.7.1/jquery.min.js"></script>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/mathquill/0.10.1/mathquill.css"/>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/mathquill/0.10.1/mathquill.js"></script>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: transparent; padding: 4px; }
+
+/* MathQuill field */
+#mq-wrapper {
+    display: flex; align-items: center; gap: 8px;
+    border: 2px solid #444; border-radius: 8px;
+    padding: 8px 12px; background: #1a1a2e; min-height: 48px;
+    cursor: text; transition: border-color 0.2s;
+}
+#mq-wrapper:focus-within { border-color: #00d4ff; }
+#mq-wrapper .mq-label { color: #888; font-size: 15px; white-space: nowrap; user-select: none; }
+#math-field { flex: 1; font-size: 20px; }
+
+/* MathQuill dark overrides */
+.mq-editable-field { border: none !important; }
+.mq-editable-field .mq-root-block,
+.mq-editable-field .mq-root-block * { color: #e8e8e8 !important; }
+.mq-editable-field .mq-cursor { border-left-color: #00d4ff !important; }
+.mq-editable-field.mq-focused { box-shadow: none !important; }
+.mq-editable-field .mq-selection .mq-root-block *,
+.mq-editable-field .mq-selection .mq-root-block { background: rgba(0,212,255,0.25) !important; }
+
+/* LaTeX display */
+#latex-row { display: flex; align-items: center; gap: 6px; margin: 5px 0; }
+#latex-display {
+    flex: 1; font-family: 'Courier New', monospace; font-size: 12px;
+    color: #666; background: #111; border-radius: 4px; padding: 4px 8px;
+    overflow-x: auto; white-space: nowrap;
+}
+
+/* Tabs */
+.tabs { display: flex; gap: 2px; margin-bottom: 4px; }
+.tab-btn {
+    flex: 1; background: #16162a; color: #777; border: none;
+    border-bottom: 2px solid transparent; padding: 7px 4px;
+    cursor: pointer; font-size: 13px; font-weight: 500; transition: all 0.15s;
+}
+.tab-btn:hover { color: #aaa; }
+.tab-btn.active { color: #00d4ff; border-bottom-color: #00d4ff; background: #1a1a35; }
+
+/* Keyboard */
+.tab-content { display: none; }
+.tab-content.active { display: block; }
+.btn-grid { display: grid; gap: 4px; margin-bottom: 4px; }
+.grid-7 { grid-template-columns: repeat(7, 1fr); }
+.grid-5 { grid-template-columns: repeat(5, 1fr); }
+.grid-4 { grid-template-columns: repeat(4, 1fr); }
+.grid-3 { grid-template-columns: repeat(3, 1fr); }
+
+.kb-btn {
+    background: #1e1e3a; color: #d0d0d0; border: 1px solid #333;
+    border-radius: 6px; padding: 9px 2px; font-size: 14px;
+    cursor: pointer; transition: all 0.12s; text-align: center;
+    user-select: none; white-space: nowrap;
+}
+.kb-btn:hover { background: #2a2a50; border-color: #555; }
+.kb-btn:active { background: #00d4ff; color: #000; border-color: #00d4ff; }
+.kb-btn.accent { color: #00d4ff; }
+.kb-btn.danger { color: #ff6b6b; }
+.kb-btn.wide { font-size: 12px; }
+</style>
+</head>
+<body>
+
+<div id="mq-wrapper" onclick="mathField && mathField.focus()">
+    <span class="mq-label">f(x) =</span>
+    <span id="math-field"></span>
+</div>
+
+<div id="latex-row">
+    <span style="color:#555; font-size:11px;">LaTeX:</span>
+    <div id="latex-display"></div>
+</div>
+
+<div class="tabs">
+    <button class="tab-btn active" data-tab="basic">Basic</button>
+    <button class="tab-btn" data-tab="trig">sin cos</button>
+    <button class="tab-btn" data-tab="greek">&alpha;&beta;&gamma;</button>
+    <button class="tab-btn" data-tab="advanced">&Sigma;&int;&Pi;</button>
+</div>
+
+<!-- TAB: Basic -->
+<div id="tab-basic" class="tab-content active">
+    <div class="btn-grid grid-7">
+        <button class="kb-btn" onclick="typeChar('7')">7</button>
+        <button class="kb-btn" onclick="typeChar('8')">8</button>
+        <button class="kb-btn" onclick="typeChar('9')">9</button>
+        <button class="kb-btn accent" onclick="typeChar('+')">+</button>
+        <button class="kb-btn accent" onclick="typeChar('-')">&minus;</button>
+        <button class="kb-btn accent" onclick="typeChar('x')">x</button>
+        <button class="kb-btn accent" onclick="typeChar('y')">y</button>
+    </div>
+    <div class="btn-grid grid-7">
+        <button class="kb-btn" onclick="typeChar('4')">4</button>
+        <button class="kb-btn" onclick="typeChar('5')">5</button>
+        <button class="kb-btn" onclick="typeChar('6')">6</button>
+        <button class="kb-btn accent" onclick="insertTimes()">&times;</button>
+        <button class="kb-btn accent" onclick="insertCmd('\\div')">&div;</button>
+        <button class="kb-btn" onclick="typeChar('(')">(</button>
+        <button class="kb-btn" onclick="typeChar(')')">)</button>
+    </div>
+    <div class="btn-grid grid-7">
+        <button class="kb-btn" onclick="typeChar('1')">1</button>
+        <button class="kb-btn" onclick="typeChar('2')">2</button>
+        <button class="kb-btn" onclick="typeChar('3')">3</button>
+        <button class="kb-btn accent" onclick="insertSquare()">x&sup2;</button>
+        <button class="kb-btn accent" onclick="insertCmd('^')">x&#8319;</button>
+        <button class="kb-btn accent" onclick="insertCmd('\\sqrt')">&radic;</button>
+        <button class="kb-btn accent" onclick="insertCmd('\\nthroot')">&#8319;&radic;</button>
+    </div>
+    <div class="btn-grid grid-7">
+        <button class="kb-btn" onclick="typeChar('0')">0</button>
+        <button class="kb-btn" onclick="typeChar('.')">.</button>
+        <button class="kb-btn accent" onclick="insertCmd('\\pi')">&pi;</button>
+        <button class="kb-btn accent" onclick="typeChar('e')">e</button>
+        <button class="kb-btn accent" onclick="insertCmd('\\frac')"><sup>a</sup>&frasl;<sub>b</sub></button>
+        <button class="kb-btn danger" onclick="doBackspace()">&larr;</button>
+        <button class="kb-btn danger" onclick="doClear()">AC</button>
+    </div>
+</div>
+
+<!-- TAB: Trigonometric -->
+<div id="tab-trig" class="tab-content">
+    <div class="btn-grid grid-5">
+        <button class="kb-btn wide" onclick="insertFunc('\\sin')">sin</button>
+        <button class="kb-btn wide" onclick="insertFunc('\\cos')">cos</button>
+        <button class="kb-btn wide" onclick="insertFunc('\\tan')">tan</button>
+        <button class="kb-btn wide" onclick="insertFunc('\\ln')">ln</button>
+        <button class="kb-btn wide" onclick="insertFunc('\\log')">log</button>
+    </div>
+    <div class="btn-grid grid-5">
+        <button class="kb-btn wide" onclick="insertFunc('\\csc')">csc</button>
+        <button class="kb-btn wide" onclick="insertFunc('\\sec')">sec</button>
+        <button class="kb-btn wide" onclick="insertFunc('\\cot')">cot</button>
+        <button class="kb-btn wide" onclick="insertExpFunc()">e<sup>x</sup></button>
+        <button class="kb-btn wide" onclick="insertAbs()">|x|</button>
+    </div>
+    <div class="btn-grid grid-3">
+        <button class="kb-btn wide" onclick="insertFunc('\\arcsin')">arcsin</button>
+        <button class="kb-btn wide" onclick="insertFunc('\\arccos')">arccos</button>
+        <button class="kb-btn wide" onclick="insertFunc('\\arctan')">arctan</button>
+    </div>
+</div>
+
+<!-- TAB: Greek / Constants -->
+<div id="tab-greek" class="tab-content">
+    <div class="btn-grid grid-5">
+        <button class="kb-btn" onclick="insertCmd('\\pi')">&pi;</button>
+        <button class="kb-btn" onclick="typeChar('e')">e</button>
+        <button class="kb-btn" onclick="insertCmd('\\infty')">&infin;</button>
+        <button class="kb-btn" onclick="typeChar('i')">i</button>
+        <button class="kb-btn" onclick="typeChar('n')">n</button>
+    </div>
+    <div class="btn-grid grid-5">
+        <button class="kb-btn" onclick="insertCmd('\\alpha')">&alpha;</button>
+        <button class="kb-btn" onclick="insertCmd('\\beta')">&beta;</button>
+        <button class="kb-btn" onclick="insertCmd('\\gamma')">&gamma;</button>
+        <button class="kb-btn" onclick="insertCmd('\\theta')">&theta;</button>
+        <button class="kb-btn" onclick="insertCmd('\\lambda')">&lambda;</button>
+    </div>
+    <div class="btn-grid grid-5">
+        <button class="kb-btn" onclick="insertCmd('\\mu')">&mu;</button>
+        <button class="kb-btn" onclick="insertCmd('\\sigma')">&sigma;</button>
+        <button class="kb-btn" onclick="insertCmd('\\omega')">&omega;</button>
+        <button class="kb-btn" onclick="insertCmd('\\phi')">&phi;</button>
+        <button class="kb-btn" onclick="insertCmd('\\delta')">&delta;</button>
+    </div>
+</div>
+
+<!-- TAB: Advanced (decorative/reference) -->
+<div id="tab-advanced" class="tab-content">
+    <div class="btn-grid grid-4">
+        <button class="kb-btn wide" onclick="insertIntegral()">&int;</button>
+        <button class="kb-btn wide" onclick="insertDerivative()">d/dx</button>
+        <button class="kb-btn wide" onclick="insertCmd('\\sum')">&Sigma;</button>
+        <button class="kb-btn wide" onclick="insertCmd('\\prod')">&Pi;</button>
+    </div>
+    <div class="btn-grid grid-4">
+        <button class="kb-btn accent" onclick="typeChar('z')">z</button>
+        <button class="kb-btn accent" onclick="typeChar('t')">t</button>
+        <button class="kb-btn" onclick="insertCmd('\\le')">&le;</button>
+        <button class="kb-btn" onclick="insertCmd('\\ge')">&ge;</button>
+    </div>
+</div>
+
+<script>
+/* ========= Streamlit Component Communication ========= */
+const StreamlitApi = {
+    setComponentReady() {
+        window.parent.postMessage({isStreamlitMessage: true, type: "streamlit:componentReady", apiVersion: 1}, "*");
+    },
+    setComponentValue(value) {
+        window.parent.postMessage({isStreamlitMessage: true, type: "streamlit:setComponentValue", value: value}, "*");
+    },
+    setFrameHeight(h) {
+        window.parent.postMessage({isStreamlitMessage: true, type: "streamlit:setFrameHeight", height: h || document.body.scrollHeight}, "*");
+    }
+};
+
+/* ========= MathQuill Setup ========= */
+var MQ = MathQuill.getInterface(2);
+var mathField = MQ.MathField(document.getElementById('math-field'), {
+    spaceBehavesLikeTab: true,
+    leftRightIntoCmdGoes: 'up',
+    restrictMismatchedBrackets: true,
+    supSubsRequireOperand: true,
+    autoCommands: 'pi theta sqrt nthroot sum prod int alpha beta gamma delta sigma omega phi lambda mu',
+    autoOperatorNames: 'sin cos tan cot sec csc arcsin arccos arctan ln log exp',
+    handlers: {
+        edit: function() { sendUpdate(); }
+    }
+});
+
+function sendUpdate() {
+    var latex = mathField.latex();
+    document.getElementById('latex-display').textContent = latex;
+    StreamlitApi.setComponentValue(latex);
+}
+
+/* ========= Keyboard Actions ========= */
+function typeChar(ch) { mathField.typedText(ch); mathField.focus(); }
+function insertCmd(cmd) { mathField.cmd(cmd); mathField.focus(); }
+
+function insertTimes() {
+    mathField.cmd('\\cdot');
+    mathField.focus();
+}
+
+function insertSquare() {
+    mathField.cmd('^');
+    mathField.typedText('2');
+    mathField.keystroke('Tab');
+    mathField.focus();
+}
+
+function insertFunc(cmd) {
+    mathField.cmd(cmd);
+    mathField.typedText('(');
+    mathField.focus();
+}
+
+function insertExpFunc() {
+    mathField.typedText('e');
+    mathField.cmd('^');
+    mathField.focus();
+}
+
+function insertAbs() {
+    mathField.write('\\left|\\right|');
+    mathField.keystroke('Left');
+    mathField.focus();
+}
+
+function insertIntegral() {
+    mathField.cmd('\\int');
+    mathField.focus();
+}
+
+function insertDerivative() {
+    mathField.write('\\frac{d}{dx}');
+    mathField.focus();
+}
+
+function doBackspace() { mathField.keystroke('Backspace'); mathField.focus(); }
+function doClear() { mathField.latex(''); mathField.focus(); sendUpdate(); }
+
+/* ========= Tabs ========= */
+document.querySelectorAll('.tab-btn').forEach(function(btn) {
+    btn.addEventListener('click', function() {
+        document.querySelectorAll('.tab-btn').forEach(function(b) { b.classList.remove('active'); });
+        document.querySelectorAll('.tab-content').forEach(function(c) { c.classList.remove('active'); });
+        btn.classList.add('active');
+        document.getElementById('tab-' + btn.dataset.tab).classList.add('active');
+        mathField.focus();
+    });
+});
+
+/* ========= Streamlit Render ========= */
+var initialized = false;
+window.addEventListener("message", function(event) {
+    if (event.data.type === "streamlit:render") {
+        var args = event.data.args || {};
+        if (!initialized) {
+            initialized = true;
+            var def = args.default_latex || "";
+            if (def) {
+                mathField.latex(def);
+                document.getElementById('latex-display').textContent = def;
+            }
+        }
+        /* Update label if provided */
+        if (args.label) {
+            document.querySelector('.mq-label').textContent = args.label;
+        }
+        StreamlitApi.setFrameHeight();
+    }
+});
+
+StreamlitApi.setComponentReady();
+StreamlitApi.setFrameHeight();
+</script>
+</body>
+</html>
