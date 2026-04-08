@@ -17,7 +17,6 @@ def math_input(
     label: str = "f(x) =",
     default_latex: str = "",
     key: Optional[str] = None,
-    height: int = 360,
 ) -> str:
     """Render a MathQuill keyboard and return the LaTeX string."""
     restore = default_latex
@@ -29,9 +28,42 @@ def math_input(
         label=label,
         key=key,
         default=default_latex,
-        height=height,
     )
     return value if value is not None else default_latex
+
+
+_SYMPY_LOCALS = {
+    "pi": sp.pi, "π": sp.pi, "e": sp.E, "E": sp.E,
+    "inf": sp.oo, "oo": sp.oo, "∞": sp.oo,
+    "sqrt": sp.sqrt, "log": sp.log, "ln": sp.log,
+    "sin": sp.sin, "cos": sp.cos, "tan": sp.tan,
+    "asin": sp.asin, "acos": sp.acos, "atan": sp.atan,
+    "x": sp.Symbol("x"), "y": sp.Symbol("y"), "z": sp.Symbol("z"),
+    "t": sp.Symbol("t"), "n": sp.Symbol("n"),
+}
+
+
+def parse_expr_to_float(text: str, label: str = "valor") -> Optional[float]:
+    """Parse a text expression (e.g. 'pi/2', 'sqrt(2)', '3.14159') to float."""
+    if not text or not text.strip():
+        st.error(f"El campo '{label}' no puede estar vacio.")
+        return None
+    s = text.strip().replace("π", "pi").replace("∞", "oo")
+    try:
+        val = float(s)
+        return val
+    except ValueError:
+        pass
+    try:
+        expr = sp.sympify(s, locals=_SYMPY_LOCALS)
+        val = float(expr.evalf())
+        if np.isfinite(val):
+            return val
+        st.error(f"El valor de '{label}' no es finito: {text}")
+        return None
+    except Exception as e:
+        st.error(f"No se pudo interpretar '{label}': {text}  —  {e}")
+        return None
 
 
 def _preprocess_latex(latex: str) -> str:

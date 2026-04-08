@@ -7,6 +7,7 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/mathquill/0.10.1/mathquill.js"></script>
 <style>
 * { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { overflow: hidden; }
 body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: transparent; padding: 4px; }
 
 /* MathQuill field */
@@ -49,7 +50,7 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; b
 
 /* Keyboard */
 .tab-content { display: none; }
-.tab-content.active { display: block; }
+.tab-content.active { display: block; min-height: 190px; }
 .btn-grid { display: grid; gap: 4px; margin-bottom: 4px; }
 .grid-7 { grid-template-columns: repeat(7, 1fr); }
 .grid-5 { grid-template-columns: repeat(5, 1fr); }
@@ -201,8 +202,19 @@ const StreamlitApi = {
     setComponentValue(value) {
         window.parent.postMessage({isStreamlitMessage: true, type: "streamlit:setComponentValue", value: value}, "*");
     },
-    setFrameHeight(h) {
-        window.parent.postMessage({isStreamlitMessage: true, type: "streamlit:setFrameHeight", height: h || document.body.scrollHeight}, "*");
+    setFrameHeight() {
+        /* Calculate actual visible content height instead of scrollHeight */
+        var children = document.body.children;
+        var totalHeight = 8; /* body padding */
+        for (var i = 0; i < children.length; i++) {
+            if (children[i].tagName === 'SCRIPT') continue;
+            var rect = children[i].getBoundingClientRect();
+            var style = window.getComputedStyle(children[i]);
+            var marginTop = parseInt(style.marginTop) || 0;
+            var marginBottom = parseInt(style.marginBottom) || 0;
+            totalHeight += rect.height + marginTop + marginBottom;
+        }
+        window.parent.postMessage({isStreamlitMessage: true, type: "streamlit:setFrameHeight", height: Math.ceil(totalHeight)}, "*");
     }
 };
 
@@ -281,6 +293,8 @@ document.querySelectorAll('.tab-btn').forEach(function(btn) {
         btn.classList.add('active');
         document.getElementById('tab-' + btn.dataset.tab).classList.add('active');
         mathField.focus();
+        /* Recalculate height after tab content changes */
+        setTimeout(function() { StreamlitApi.setFrameHeight(); }, 10);
     });
 });
 
@@ -306,7 +320,9 @@ window.addEventListener("message", function(event) {
 });
 
 StreamlitApi.setComponentReady();
-StreamlitApi.setFrameHeight();
+/* Wait for MathQuill + layout to fully render, then set correct height */
+setTimeout(function() { StreamlitApi.setFrameHeight(); }, 50);
+setTimeout(function() { StreamlitApi.setFrameHeight(); }, 200);
 </script>
 </body>
 </html>

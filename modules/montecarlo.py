@@ -15,7 +15,7 @@ from utils.graficos import (
     plot_scatter_3d,
     plot_scatter_montecarlo,
 )
-from utils.math_keyboard import math_input, parse_latex
+from utils.math_keyboard import math_input, parse_expr_to_float, parse_latex
 
 
 def _calcular_valor_exacto_1d(expr, x_sym, a, b):
@@ -38,8 +38,10 @@ def _integracion_1d():
     latex = math_input(label="f(x) =", default_latex="x^{2}+\\sin(x)", key="mc1d_func")
     col1, col2 = st.columns(2)
     with col1:
-        a = st.number_input("Limite inferior (a)", value=0.0, key="mc1d_a")
-        b = st.number_input("Limite superior (b)", value=2.0, key="mc1d_b")
+        a_str = st.text_input("Limite inferior (a)", value="0", key="mc1d_a",
+                              help="Acepta expresiones: pi/2, sqrt(2), -pi, e, etc.")
+        b_str = st.text_input("Limite superior (b)", value="2", key="mc1d_b",
+                              help="Acepta expresiones: pi/2, sqrt(2), -pi, e, etc.")
     with col2:
         n_muestras = st.number_input("Numero de muestras (N)", value=10000, min_value=10,
                                      max_value=10_000_000, step=1000, key="mc1d_n")
@@ -55,6 +57,10 @@ def _integracion_1d():
         x_sym = sp.Symbol("x")
         expr, f_np = parse_latex(latex, [x_sym])
         if expr is None:
+            return
+        a = parse_expr_to_float(a_str, "a")
+        b = parse_expr_to_float(b_str, "b")
+        if a is None or b is None:
             return
 
         rng = np.random.default_rng(semilla if semilla > 0 else None)
@@ -183,13 +189,15 @@ def _integracion_multidimensional():
         latex = math_input(label="f(x,y,z) =", default_latex="x^{2}+y^{2}+z^{2}", key="mc_nd_func")
 
     cols = st.columns(n_dims)
-    rangos = []
+    rangos_str = []
     nombres = ["x", "y", "z"]
     for i in range(n_dims):
         with cols[i]:
-            ai = st.number_input(f"{nombres[i]} min", value=0.0, key=f"mc_nd_{nombres[i]}_min")
-            bi = st.number_input(f"{nombres[i]} max", value=1.0, key=f"mc_nd_{nombres[i]}_max")
-            rangos.append((ai, bi))
+            ai_str = st.text_input(f"{nombres[i]} min", value="0", key=f"mc_nd_{nombres[i]}_min",
+                                   help="Acepta: pi/2, sqrt(2), etc.")
+            bi_str = st.text_input(f"{nombres[i]} max", value="1", key=f"mc_nd_{nombres[i]}_max",
+                                   help="Acepta: pi/2, sqrt(2), etc.")
+            rangos_str.append((ai_str, bi_str))
 
     n_muestras = st.number_input("Numero de muestras (N)", value=50000, min_value=100,
                                  max_value=10_000_000, step=5000, key="mc_nd_n")
@@ -201,6 +209,14 @@ def _integracion_multidimensional():
         expr, f_np = parse_latex(latex, simbolos)
         if expr is None:
             return
+
+        rangos = []
+        for i, (ai_str, bi_str) in enumerate(rangos_str):
+            ai = parse_expr_to_float(ai_str, f"{nombres[i]} min")
+            bi = parse_expr_to_float(bi_str, f"{nombres[i]} max")
+            if ai is None or bi is None:
+                return
+            rangos.append((ai, bi))
 
         rng = np.random.default_rng(semilla if semilla > 0 else None)
         puntos = [rng.uniform(rangos[i][0], rangos[i][1], size=int(n_muestras)) for i in range(n_dims)]
@@ -258,8 +274,10 @@ def _comparacion_metodos():
     latex = math_input(label="f(x) =", default_latex="x^{2}+\\sin(x)", key="mc_comp_func")
     col1, col2 = st.columns(2)
     with col1:
-        a = st.number_input("Limite inferior (a)", value=0.0, key="mc_comp_a")
-        b = st.number_input("Limite superior (b)", value=2.0, key="mc_comp_b")
+        a_str = st.text_input("Limite inferior (a)", value="0", key="mc_comp_a",
+                              help="Acepta expresiones: pi/2, sqrt(2), -pi, e, etc.")
+        b_str = st.text_input("Limite superior (b)", value="2", key="mc_comp_b",
+                              help="Acepta expresiones: pi/2, sqrt(2), -pi, e, etc.")
     with col2:
         n_muestras = st.number_input("N (Monte Carlo)", value=100000, min_value=100,
                                      max_value=10_000_000, key="mc_comp_n")
@@ -270,6 +288,10 @@ def _comparacion_metodos():
         x_sym = sp.Symbol("x")
         expr, f_np = parse_latex(latex, [x_sym])
         if expr is None:
+            return
+        a = parse_expr_to_float(a_str, "a")
+        b = parse_expr_to_float(b_str, "b")
+        if a is None or b is None:
             return
 
         valor_exacto = _calcular_valor_exacto_1d(expr, x_sym, a, b)
