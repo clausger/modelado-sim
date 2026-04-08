@@ -10,7 +10,7 @@ MODULOS = {
     "Raices y Punto Fijo": {"icon": "🔍", "wip": True},
     "Newton-Raphson / Aitken": {"icon": "📐", "wip": True},
     "Interpolacion y Derivacion": {"icon": "📊", "wip": True},
-    "Integracion Numerica": {"icon": "∫", "wip": True},
+    "Integracion Numerica": {"icon": "∫", "wip": False},
     "Montecarlo": {"icon": "🎲", "wip": False},
     "EDOs": {"icon": "📈", "wip": True},
 }

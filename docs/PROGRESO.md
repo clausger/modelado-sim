@@ -4,6 +4,42 @@ Registro de avance sesion por sesion.
 
 ---
 
+## Sesion 1 (continuacion) — 2026-04-08
+
+### Trabajo realizado
+
+1. **modules/integracion.py — Implementacion completa (Newton-Cotes)**
+   - 4 metodos: Rectangulo (Punto Medio), Trapecio Compuesto, Simpson 1/3, Simpson 3/8
+   - Submenú con radio horizontal para navegar entre metodos
+   - Cada metodo incluye:
+     - Expander con teoria: idea geometrica, formula LaTeX, error de truncamiento, restriccion de n
+     - Inputs comunes: funcion f(x), limites a/b, subintervalos n, slider de tolerancia
+     - Validaciones: Simpson 1/3 fuerza n par, Simpson 3/8 fuerza multiplo de 3
+     - Metricas: integral aproximada, valor exacto (SymPy), error absoluto/relativo
+     - Tabla de puntos de evaluacion: i, x_i, f(x_i), peso, contribucion (resalta maximo)
+     - Tabla de convergencia: n, h, resultado, error vs exacto, convergencia
+     - Grafico Plotly: curva f(x) + figuras geometricas (rectangulos/trapecios) + puntos
+   - Comparacion de Metodos:
+     - Tabla con los 4 metodos, n ajustado, resultado, error, orden
+     - Grafico de barras de error absoluto (escala log)
+     - Grafico de convergencia superpuesto (4 lineas + valor exacto)
+   - Tabla comparativa fija siempre visible al inicio del modulo
+
+2. **app.py** — Integracion Numerica marcado como activo (ya no WIP)
+
+### Estado actual
+
+| Modulo | Estado |
+|--------|--------|
+| Raices y Punto Fijo | WIP placeholder |
+| Newton-Raphson / Aitken | WIP placeholder |
+| Interpolacion y Derivacion | WIP placeholder |
+| **Integracion Numerica** | **Completo** |
+| **Monte Carlo** | **Completo** |
+| EDOs | WIP placeholder |
+
+---
+
 ## Sesion 1 — 2026-04-08
 
 ### Objetivos
