@@ -151,6 +151,99 @@ def _fmt_latex_num(val: float) -> str:
     return f"{val:.6f}".rstrip("0").rstrip(".")
 
 
+def _render_teoria_libro() -> None:
+    """Renderiza un expander con la teoria del libro del profesor Caceres (pags. 36-42).
+
+    Contenido:
+      - Los 4 pasos del metodo (pag. 36)
+      - Fundamento teorico: I = V(Omega) * E[f(x)] + LGN (pag. 40-41)
+      - Formulas operativas: estimador, sigma, EE, IC (pag. 39)
+      - Nota sobre x_bar (libro) = f_bar (nuestra notacion)
+      - Tabla 4 de z criticos (pag. 39)
+      - Verificacion de semilla: primeros 5 valores U(0,1) con seed=42 (pag. 40)
+
+    Se muestra como expander colapsable al tope de cada submodulo para tener
+    siempre a mano lo necesario para responder preguntas teoricas.
+    """
+    with st.expander("📖 Teoria del libro (Caceres, pags. 36-42)", expanded=False):
+        st.markdown("##### 1. Los 4 pasos del metodo (pag. 36)")
+        st.markdown(
+            "1. **Definir el dominio** de muestreo (intervalo, rectangulo, volumen).\n"
+            "2. **Generar valores aleatorios** uniformes sobre el dominio.\n"
+            "3. **Evaluar la funcion** en cada muestra.\n"
+            "4. **Calcular la estimacion** como promedio ponderado por el volumen del dominio."
+        )
+
+        st.markdown("##### 2. Fundamento: valor esperado + LGN (pag. 40-41)")
+        st.latex(r"I \;=\; \int_\Omega f(x)\,dx \;=\; V(\Omega)\cdot E[f(x)]")
+        st.latex(
+            r"\lim_{n \to \infty}\; \frac{1}{n}\sum_{i=1}^{n} f(x_i) \;=\; E[f(x)]"
+            r"\quad\text{(Ley de los Grandes Numeros)}"
+        )
+        st.caption(
+            "El estimador Monte Carlo se apoya en la LGN: el promedio de "
+            "f(x_i) converge al valor esperado cuando n crece."
+        )
+
+        st.markdown("##### 3. Formulas operativas (pag. 39)")
+        st.latex(
+            r"\hat{I} \;=\; V(\Omega)\cdot \bar{f}, \qquad "
+            r"\bar{f} \;=\; \frac{1}{n}\sum_{i=1}^{n} f(x_i)"
+        )
+        st.latex(
+            r"\sigma \;=\; \sqrt{\frac{1}{n-1}\sum_{i=1}^{n}\bigl(f(x_i)-\bar{f}\bigr)^{2}}"
+        )
+        st.latex(
+            r"\text{EE} \;=\; \frac{\sigma}{\sqrt{n}}, \qquad "
+            r"\text{IC} \;=\; \hat{I} \;\pm\; z_{\alpha/2}\cdot \frac{\sigma}{\sqrt{n}}"
+        )
+        st.caption(
+            "Convencion de catedra: la formula del IC NO lleva (b-a) ni V(Omega). "
+            "El factor de volumen ya esta en Î y la dispersion se mide sobre los "
+            "valores f(x_i) directamente."
+        )
+
+        st.markdown("##### 4. Nota: `x̄` en el libro ≡ `f̄` en la app")
+        st.markdown(
+            "El libro escribe la formula de σ con `x̄`, pero en pag. 40 define "
+            "explicitamente `x̄ = (1/n)·Σ f(xᵢ)` — o sea, el **promedio de las "
+            "evaluaciones de la funcion**, no de las coordenadas. En esta app "
+            "lo llamamos `f̄` para dejarlo explicito. Son matematicamente lo mismo."
+        )
+
+        st.markdown("##### 5. Valores criticos z (Tabla 4, pag. 39)")
+        df_z = pd.DataFrame(
+            {
+                "Nivel de confianza": ["90%", "95%", "99%", "99.7% (3σ)"],
+                "z_(α/2)": [1.645, 1.960, 2.576, 2.968],
+            }
+        )
+        st.dataframe(df_z, use_container_width=True, hide_index=True)
+
+        st.markdown("##### 6. Verificacion de semilla (pag. 40)")
+        st.caption(
+            "Con `random.seed(42)` + `random.uniform(0, 1)`, los primeros 5 valores "
+            "deben coincidir exactamente con los del libro:"
+        )
+        df_seed = pd.DataFrame(
+            {
+                "i": [1, 2, 3, 4, 5],
+                "random.uniform(0, 1)": [
+                    0.6394267984578837,
+                    0.025010755222666936,
+                    0.27502931836911926,
+                    0.22321073814882275,
+                    0.7364712141640124,
+                ],
+            }
+        )
+        st.dataframe(df_seed, use_container_width=True, hide_index=True)
+        st.caption(
+            "Si estos valores coinciden con los que obtiene el alumno, la "
+            "convencion de semilla + RNG es la correcta (stdlib, no numpy)."
+        )
+
+
 def _render_valores_intermedios_1d(
     f_vals: np.ndarray,
     a: float,
@@ -591,6 +684,8 @@ def _calcular_valor_exacto_1d(expr, x_sym, a, b):
 def _integracion_1d():
     st.subheader("Integracion Monte Carlo 1D")
 
+    _render_teoria_libro()
+
     st.latex(r"I = \int_a^b f(x)\,dx \approx \frac{b-a}{N}\sum_{i=1}^{N} f(x_i)")
     st.latex(r"x_i \sim \mathcal{U}(a, b)")
 
@@ -802,6 +897,8 @@ def _render_visualizaciones_1d(
 def _integracion_multidimensional():
     st.subheader("Integracion Monte Carlo Multidimensional")
 
+    _render_teoria_libro()
+
     st.latex(r"I = \int_D f(\mathbf{x})\,d\mathbf{x} \approx \frac{V(D)}{N}\sum_{i=1}^{N} f(\mathbf{x}_i)")
 
     n_dims = st.radio("Dimensiones", [2, 3], horizontal=True, key="mc_nd_dims")
@@ -942,6 +1039,8 @@ def _integracion_multidimensional():
 
 def _comparacion_metodos():
     st.subheader("Comparacion de Metodos")
+
+    _render_teoria_libro()
 
     st.latex(r"\text{Monte Carlo vs Trapecios vs Simpson}")
 
@@ -1086,6 +1185,9 @@ def _muestreo_rechazo_2d():
         IC = A_hat +/- z * A_rect * sigma_p / sqrt(N)
     """
     st.subheader("Muestreo por rechazo 2D")
+
+    _render_teoria_libro()
+
     st.caption(
         "Estima un area (o probabilidad) generando puntos uniformes en un "
         "rectangulo envolvente y contando cuantos caen dentro de la region de "
@@ -1097,6 +1199,13 @@ def _muestreo_rechazo_2d():
         r"IC \;=\; \hat{A} \;\pm\; z_{\alpha/2} \cdot A_{\text{rect}} \cdot \frac{\sigma_p}{\sqrt{N}}"
     )
     st.latex(r"\sigma_p \;=\; \sqrt{\hat{p}\,(1 - \hat{p})}, \qquad \hat{p} = k/N")
+    st.caption(
+        "⚠ Nota: el libro de catedra define la formula del IC para integracion "
+        "(seccion 5, pag. 39), pero **no** define explicitamente un IC para el "
+        "metodo de rechazo (seccion 4, pag. 37). Aca usamos el IC Bernoulli "
+        "estandar sobre la proporcion p̂ = k/N, que es el formalismo correcto "
+        "para un conteo de aciertos/rechazos (k ~ Binomial(N, p))."
+    )
 
     tipo = st.radio(
         "Tipo de problema",

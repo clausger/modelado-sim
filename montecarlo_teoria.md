@@ -132,23 +132,33 @@ Donde:
 | 95 % | 1.960 |
 | 99 % | 2.576 |
 
-### 6.2 CORRECCIÓN CRÍTICA — Cálculo del desvío estándar
+### 6.2 Notación: `x̄` en el libro ≡ `f̄` en nuestra implementación
 
-> ⚠️ **Importante:** en las diapositivas del curso aparece una fórmula con un error de notación. La fórmula correcta es la siguiente.
+El libro del profesor (pág. 39) escribe la fórmula de σ usando `x̄`:
 
-El desvío estándar debe calcularse sobre las **evaluaciones de la función** `f(xᵢ)`, **no** sobre los puntos del dominio `xᵢ`. Es decir, se usa la **media de los `f(xᵢ)`**, denotada `f̄`:
+```
+σ = √(  (1 / (n - 1)) · Σᵢ ( f(xᵢ) - x̄ )²  )
+```
+
+y en la pág. 40 **define explícitamente** qué significa ese `x̄` en este contexto:
+
+```
+x̄ = (1 / n) · Σᵢ f(xᵢ)
+```
+
+Es decir, el libro llama `x̄` al **promedio de las evaluaciones de la función**, no al promedio de las coordenadas del dominio. Son matemáticamente lo mismo que nuestro `f̄`:
+
+```
+f̄ ≡ x̄_libro = (1 / n) · Σᵢ f(xᵢ)
+```
+
+En esta documentación y en el código de la app usamos **`f̄`** por claridad, para dejar explícito que la dispersión relevante es la de las imágenes de la función, no la de los puntos del dominio. La fórmula operativa es la misma:
 
 ```
 σ = √(  (1 / (n - 1)) · Σᵢ ( f(xᵢ) - f̄ )²  )
 ```
 
-Donde:
-
-```
-f̄ = (1/n) · Σᵢ f(xᵢ)
-```
-
-**Por qué:** lo que estamos promediando en Monte Carlo son los valores `f(xᵢ)`, no los `xᵢ`. La dispersión relevante es cuánto varían esas evaluaciones alrededor de su propio promedio `f̄`. Usar `x̄` (la media de las posiciones) no tiene sentido estadístico en este contexto.
+> **Nota menor:** la fórmula de σ en pág. 39 del libro tiene una errata tipográfica — falta el sumatorio `Σ` explícito antes del término `(f(xᵢ) - x̄)²`. La forma correcta es la de arriba, y coincide exactamente con `np.std(f_vals, ddof=1)` que es la que usa la app (y también el código oficial del libro en pág. 42).
 
 ---
 
