@@ -42,6 +42,33 @@ Registro de avance sesion por sesion.
    - Sampler `_sample_uniform_2d()` interleaved (x₁,y₁,x₂,y₂,...) para matchear el stream de un loop manual
    - 3 tabs: Resumen, Paso a paso (9 pasos), Visualizacion (scatter con aciertos/rechazos + contorno)
    - **Verificado**: ejercicio 1 (n=10000, seed=42) → k=7848, π̂=3.1392, IC 95% [3.1070, 3.1714] ✅
+   - **Verificado**: ejercicio 10 (f=√x, g=x² en [0,1], n=10000) → Â=0.3250, IC 95% [0.3156, 0.3344] cubre 1/3 ✅
+
+5. **Logic check contra el PDF del profesor (pags. 36-42)**
+   - Leido el PDF oficial del profesor Caceres, secciones de Monte Carlo (pags. 36-42)
+   - **Pag. 36**: 4 pasos del metodo (definir dominio → generar → evaluar → calcular) + caracteristicas
+   - **Pag. 37**: Metodo grafico de rechazo: Area(R) ≈ A_rect × (aciertos/total)
+   - **Pag. 38**: Codigo python oficial para π con `random.uniform(-1,1)` stdlib
+   - **Pag. 39**: Formulas σ, EE=σ/√n, IC = [Î - z·σ/√n, Î + z·σ/√n] sin (b-a); Tabla 4 con z criticos
+   - **Pag. 40**: LGN, x̄ = (1/n)·Σf(xᵢ), verificacion seed=42 → primeros 5 valores
+   - **Pag. 41**: Fundamento I = V(Ω)·E[f(x)], casos 1D y 2D
+   - **Pag. 42**: Codigo oficial `monte_carlo_with_ci()` — inconsistencia menor: usa `np.random.uniform` en vez del stdlib de pag. 40
+   - **Decision**: seguir con `random.seed(42)` + `random.uniform()` stdlib porque pag. 40 lo fija explicitamente y es la unica manera de verificar la semilla con los 5 valores del libro
+
+6. **Tanda 1 — Fixes de texto (resultado del logic check)**
+   - **`montecarlo_teoria.md` §6.2 reescrito**: la version anterior decia que el libro tenia un "error de formula" cuando en realidad el libro define `x̄ = (1/n)·Σ f(xᵢ)` explicitamente en pag. 40 (o sea, x̄ ≡ f̄). Corregido para flagear solo el erratum tipografico menor (falta `Σ` en la formula de pag. 39)
+   - **Caption Bernoulli en rechazo**: el libro NO define IC para muestreo por rechazo (seccion 4 del libro cubre solo el estimador de area). Agregado caption explicando que usamos el IC Bernoulli estandar sobre p̂ = k/N porque es el formalismo correcto para un conteo binomial
+
+7. **Tanda 2 — Didactico en UI (helper `_render_teoria_libro()`)**
+   - Nueva funcion helper que renderiza un **expander colapsable** con toda la teoria del libro al tope de cada submodulo
+   - 6 secciones autocontenidas:
+     1. Los 4 pasos del metodo (pag. 36)
+     2. Fundamento: I = V(Ω)·E[f(x)] + LGN (pag. 40-41)
+     3. Formulas operativas: Î, σ, EE, IC (pag. 39) con caption sobre la convencion sin (b-a)
+     4. Nota `x̄` libro ≡ `f̄` app
+     5. Tabla 4 de z criticos (90/95/99/99.7)
+     6. Verificacion de semilla: primeros 5 valores `random.uniform(0,1)` con seed=42 para que el alumno chequee que su stdlib matchea el del libro
+   - Wired en los 4 submodulos: Integracion 1D, Multidim, Muestreo por rechazo 2D, Comparacion de metodos
 
 ### Cobertura de la guia de ejercicios
 
@@ -53,9 +80,20 @@ Registro de avance sesion por sesion.
 | 11 | Simulador orbital | Pendiente |
 | 12 | Black-Scholes + VaR | Pendiente |
 
+### Commits de la sesion
+
+| Hash | Mensaje |
+|------|---------|
+| `1c5ef39` | docs(montecarlo): add class theory reference |
+| `3140389` | feat(montecarlo): catedra alignment, step-by-step tabs, rejection sampling 2D |
+| `801af79` | docs(progreso): log session 2 Monte Carlo improvements |
+| `53e13e6` | feat(montecarlo): in-app theory reference + clarify rejection CI |
+
 ### Proximos pasos
-- Resolver ejercicios 2-9 uno por uno con el script
+- **Ejercicio 2**: I = ∫[0,1] e^(-x²) dx con IC 99.7%, error maximo 1/100 (pendiente para proxima sesion)
+- Resolver ejercicios 3-9 uno por uno con el script
 - Decidir si los ejercicios 11 y 12 van como submodulos dedicados o inline
+- Pushear los 4 commits locales a `origin/main` cuando estemos listos
 
 ---
 
