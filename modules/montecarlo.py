@@ -1740,6 +1740,7 @@ def render():
             "Integracion Multidimensional",
             "Muestreo por rechazo 2D",
             "Comparacion de Metodos",
+            "Vista Catedra (comparativa)",
         ],
         horizontal=True,
         key="mc_submenu",
@@ -1751,5 +1752,10 @@ def render():
         _integracion_multidimensional()
     elif submenu == "Muestreo por rechazo 2D":
         _muestreo_rechazo_2d()
-    else:
+    elif submenu == "Comparacion de Metodos":
         _comparacion_metodos()
+    else:
+        # Import local para evitar circular: montecarlo_catedra importa helpers
+        # desde este modulo.
+        from modules.montecarlo_catedra import render_catedra
+        render_catedra()
