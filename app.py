@@ -1,5 +1,7 @@
 import streamlit as st
 
+from utils.ui.config import render_sidebar_config
+
 st.set_page_config(
     page_title="Modelado y Simulacion - UADE",
     page_icon="📐",
@@ -7,7 +9,7 @@ st.set_page_config(
 )
 
 MODULOS = {
-    "Raices y Punto Fijo": {"icon": "🔍", "wip": True},
+    "Raices y Punto Fijo": {"icon": "🔍", "wip": False},
     "Newton-Raphson / Aitken": {"icon": "📐", "wip": True},
     "Interpolacion y Derivacion": {"icon": "📊", "wip": True},
     "Integracion Numerica": {"icon": "∫", "wip": False},
@@ -27,8 +29,11 @@ nombre_modulo = list(MODULOS.keys())[[o.split("  ")[1].replace("  (WIP)", "").st
     seleccion.split("  ")[1].replace("  (WIP)", "").strip()
 )]
 
+# Panel de configuracion global (siempre al final del sidebar)
+render_sidebar_config()
+
 if nombre_modulo == "Raices y Punto Fijo":
-    from modules.biseccion import render
+    from modules.raices import render
     render()
 elif nombre_modulo == "Newton-Raphson / Aitken":
     from modules.newton_raphson import render
