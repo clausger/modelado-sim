@@ -135,7 +135,7 @@ def resaltar_tolerancia(columna_error: str, tolerancia: float) -> Callable[[pd.S
         try:
             err = float(fila[columna_error])
             if err <= tolerancia:
-                return ["background-color: #d4edda"] * len(fila)
+                return ["background-color: #2d6a4f; color: #ffffff"] * len(fila)
         except (KeyError, TypeError, ValueError):
             pass
         return [""] * len(fila)
