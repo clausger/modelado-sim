@@ -4,6 +4,53 @@ Registro de avance sesion por sesion.
 
 ---
 
+## Sesion 3 — 2026-04-17
+
+### Objetivos
+- Arrancar modulo de Raices (Biseccion + Punto Fijo)
+- Elevar el sistema de basico a "script que garantice un 10": tweakeable, con teoria, paso a paso tecnico/coloquial, graficos y tablas excelentes, glosario de variables
+- Dejar documentada la teoria oficial del profe antes de codear
+
+### Trabajo realizado
+
+1. **Lectura del PDF oficial del profe (pg 1-20)**
+   - Libro: `Modelado y Simulacion por Omar J. Caceres segunda edicion 2026-1-20.pdf`
+   - Cubre: conceptos basicos (pg 5-7), Biseccion (pg 8-10), Punto Fijo (pg 11-12), Aitken (pg 13-14), Newton-Raphson (pg 15-16), ejercicios (pg 17-19), arranque Lagrange (pg 20)
+   - Segundo PDF (pg 20-39) queda pendiente de lectura, contiene Lagrange + Newton-Cotes + arranque MC
+
+2. **`docs/teoria/raices_teoria.md` (nuevo)**
+   - Destilacion completa de la teoria de raices del libro
+   - 11 secciones: conceptos, Tabla 1 comparativa, errores, 4 criterios deteccion, Lipschitz/Banach, Biseccion, Punto Fijo, Aitken, NR, banco de ejercicios, convenciones UI
+   - Formulas en LaTeX listas para consumo desde la UI
+   - Codigo oficial del profe para cada metodo con su `precision=5`
+
+3. **Plan de accion acordado (3 capas)**
+   - **Capa 0 — infraestructura compartida** (`utils/ui/`): teoria, pasos, glosario, tablas, graficos, config, verificador, export. Se construye una vez, todos los modulos la heredan.
+   - **Capa 1 — modulo especifico**: consume Capa 0 + logica numerica + pre-checks + banco de ejercicios oficiales como presets.
+   - **Capa 2 — Modo Examen**: toggle global, cheat sheet, resumen imprimible, verificador de calculo manual al frente.
+
+4. **Memoria persistente actualizada**
+   - `reference_pdfs_catedra.md` — ubicacion y contenido de los 2 PDFs
+   - `project_convenciones_catedra.md` — precision round(·,5), 4 criterios deteccion, notacion
+   - `project_arquitectura_ui.md` — plan de las 3 capas detallado
+
+### Convenciones criticas extraidas del PDF
+
+- **Modo libro**: `round(valor, 5)` en cada paso para matchear bit-a-bit los valores del profe
+- **4 criterios de deteccion oficiales** (abs / rel / residuo / max iter) — combinables via toggles
+- **Tabla 1 del libro** (pg 6): Biseccion lineal siempre converge, Punto Fijo lineal requiere |g'|<1, NR cuadratica necesita derivada
+- **Cotas teoricas**: Biseccion `|e_n| ≤ (b-a)/2^(n+1)`, Punto Fijo `d(x_n, x*) ≤ k^n·d(x_0, x*)`
+- **Lipschitz uniforme**: chequear |g'| en TODO el intervalo, no solo en x_0 (conjunto compacto)
+- **Banco de ejercicios oficial**: 5 Biseccion + 10 Punto Fijo + 11 Aitken + 12 NR (pg 17-19) para usar como presets
+
+### Proximos pasos
+- **Capa 0**: arrancar `utils/ui/` con teoria.py + glosario.py + tablas.py + pasos.py (primeras piezas)
+- **Capa 1 Biseccion**: modulo completo con pre-checks, 4 criterios, cotas, banco de ejercicios
+- **Capa 1 Punto Fijo**: asistente de reformulacion + cobweb + Lipschitz check
+- **Capa 2 Modo Examen**: al final, cuando ya tengamos 2 modulos andando con Capa 0
+
+---
+
 ## Sesion 2 — 2026-04-11
 
 ### Objetivos
