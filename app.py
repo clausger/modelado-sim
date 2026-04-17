@@ -10,8 +10,7 @@ st.set_page_config(
 
 MODULOS = {
     "Raices y Punto Fijo": {"icon": "🔍", "wip": False},
-    "Newton-Raphson / Aitken": {"icon": "📐", "wip": True},
-    "Interpolacion y Derivacion": {"icon": "📊", "wip": True},
+    "Interpolacion y Derivacion": {"icon": "📊", "wip": False},
     "Integracion Numerica": {"icon": "∫", "wip": False},
     "Montecarlo": {"icon": "🎲", "wip": False},
     "EDOs": {"icon": "📈", "wip": True},
@@ -22,7 +21,7 @@ st.sidebar.markdown("**UADE** - Metodos Numericos")
 st.sidebar.divider()
 
 opciones = [f"{v['icon']}  {k}{'  (WIP)' if v['wip'] else ''}" for k, v in MODULOS.items()]
-seleccion = st.sidebar.radio("Navegacion", opciones, index=4)
+seleccion = st.sidebar.radio("Navegacion", opciones, index=0)
 
 nombre_modulo = list(MODULOS.keys())[[o.split("  ")[1].replace("  (WIP)", "").strip()
                                        for o in opciones].index(
@@ -35,11 +34,8 @@ render_sidebar_config()
 if nombre_modulo == "Raices y Punto Fijo":
     from modules.raices import render
     render()
-elif nombre_modulo == "Newton-Raphson / Aitken":
-    from modules.newton_raphson import render
-    render()
 elif nombre_modulo == "Interpolacion y Derivacion":
-    from modules.lagrange import render
+    from modules.interpolacion import render
     render()
 elif nombre_modulo == "Integracion Numerica":
     from modules.integracion import render
