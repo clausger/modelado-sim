@@ -17,12 +17,15 @@ from utils.ui.config import get_config
 
 
 def fmt_decimal(valor: float | None, precision: int | None = None) -> str:
-    """Formato decimal legible que evita notacion cientifica si es razonable.
+    """Formato decimal legible — prioriza mostrar el numero COMPLETO en decimal.
 
     Reglas:
     - None o NaN -> "—"
-    - |x| >= 1e-4 y |x| < 1e6 -> decimal plano con `precision` cifras significativas
-    - Fuera de ese rango -> notacion cientifica
+    - 0 exacto -> "0"
+    - Si el numero cabe en decimal plano con precision suficiente, SIEMPRE decimal.
+    - Solo recurre a notacion cientifica cuando el numero es extremadamente chico
+      (|x| < 1e-12) o extremadamente grande (|x| >= 1e15) — casos donde mostrarlo
+      en decimal seria ilegible o truncaria todo a 0.
     """
     if valor is None:
         return "—"
@@ -39,9 +42,23 @@ def fmt_decimal(valor: float | None, precision: int | None = None) -> str:
     abs_x = abs(x)
     if abs_x == 0:
         return "0"
-    if abs_x < 1e-4 or abs_x >= 1e6:
+
+    # Extremos — recurrir a cientifica solo para casos realmente ilegibles
+    if abs_x < 1e-12 or abs_x >= 1e15:
         return f"{x:.{precision}e}"
-    return f"{x:.{precision}f}".rstrip("0").rstrip(".") or "0"
+
+    # Ajustar la precision para numeros muy chicos: si |x| = 1e-9 y pedimos 6 decimales,
+    # mostramos todos los digitos significativos hasta ver el primero no-cero.
+    # Regla: al menos `precision` cifras significativas post-coma.
+    if abs_x < 10 ** (-precision):
+        # Calcular cuantos decimales hacen falta para ver los primeros `precision` digitos.
+        import math
+        n_ceros = int(math.floor(-math.log10(abs_x)))
+        decimales_efectivos = n_ceros + precision
+        decimales_efectivos = min(decimales_efectivos, 15)  # tope de precision float64
+        return f"{x:.{decimales_efectivos}f}"
+
+    return f"{x:.{precision}f}"
 
 
 def render_tabla_iteraciones(

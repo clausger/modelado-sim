@@ -125,22 +125,40 @@ def parse_latex(
     except Exception:
         pass
 
-    # Attempt 2: manual conversion → sympify
+    # Attempt 2: manual conversion → parse_expr con multiplicacion implicita
     if expr is None:
         try:
+            from sympy.parsing.sympy_parser import (
+                parse_expr,
+                standard_transformations,
+                implicit_multiplication_application,
+                convert_xor,
+            )
             text = _latex_to_text(latex)
-            expr = sp.sympify(text, locals={
-                "x": sp.Symbol("x"), "y": sp.Symbol("y"), "z": sp.Symbol("z"),
-                "t": sp.Symbol("t"), "n": sp.Symbol("n"),
-                "e": sp.E, "pi": sp.pi, "oo": sp.oo,
-                "sin": sp.sin, "cos": sp.cos, "tan": sp.tan,
-                "csc": sp.csc, "sec": sp.sec, "cot": sp.cot,
-                "asin": sp.asin, "acos": sp.acos, "atan": sp.atan,
-                "log": sp.log, "sqrt": sp.sqrt, "exp": sp.exp,
-                "Abs": sp.Abs,
-            })
+            transformations = (
+                standard_transformations
+                + (implicit_multiplication_application, convert_xor)
+            )
+            expr = parse_expr(
+                text,
+                local_dict={
+                    "x": sp.Symbol("x"), "y": sp.Symbol("y"), "z": sp.Symbol("z"),
+                    "t": sp.Symbol("t"), "n": sp.Symbol("n"),
+                    "e": sp.E, "pi": sp.pi, "oo": sp.oo,
+                    "sin": sp.sin, "cos": sp.cos, "tan": sp.tan,
+                    "csc": sp.csc, "sec": sp.sec, "cot": sp.cot,
+                    "asin": sp.asin, "acos": sp.acos, "atan": sp.atan,
+                    "log": sp.log, "ln": sp.log,
+                    "sqrt": sp.sqrt, "exp": sp.exp, "Abs": sp.Abs,
+                },
+                transformations=transformations,
+            )
         except Exception as e:
-            st.error(f"Error al parsear la expresion: {e}")
+            st.error(
+                f"Error al parsear la expresion: {e}\n\n"
+                f"LaTeX recibido: `{latex}`\n"
+                f"Texto procesado: `{_latex_to_text(latex)}`"
+            )
             return None, None
 
     try:
