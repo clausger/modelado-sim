@@ -31,6 +31,9 @@ from modules.punto_fijo import (
     CriteriosDetencion as CritPF,
     analizar_convergencia, generar_reformulaciones, punto_fijo,
 )
+from modules.newton_raphson import (
+    CriteriosDetencion as CritNR, newton_raphson,
+)
 from utils.math_keyboard import math_input, parse_latex
 from utils.ui.config import get_config
 from utils.ui.tablas import fmt_decimal
@@ -205,6 +208,74 @@ def _correr_punto_fijo(f_expr: sp.Expr, x_sym: sp.Symbol, f_np,
     return resultados
 
 
+def _correr_newton_raphson(f_expr: sp.Expr, x_sym: sp.Symbol, f_np,
+                            x0: float, tol: float, max_iter: int,
+                            precision: int | None) -> ResultadoMetodo:
+    try:
+        fp_expr = sp.diff(f_expr, x_sym)
+        fp_np = sp.lambdify(x_sym, fp_expr, modules=["numpy"])
+    except Exception as e:
+        return ResultadoMetodo(
+            nombre="Newton-Raphson", raiz=None, iteraciones=0, convergio=False,
+            motivo_corte=f"No se pudo derivar f: {e}",
+            tiempo_ms=0.0, errores=[],
+            analisis=f"**Error al derivar f(x) simbolicamente**: {e}",
+        )
+
+    crit = CritNR(usar_abs=True, tol_abs=tol, usar_rel=False,
+                   usar_residuo=True, tol_residuo=tol,
+                   usar_max_iter=True, max_iter=max_iter)
+    t0 = time.perf_counter()
+    res = newton_raphson(f_np, fp_np, x0, crit, precision=precision)
+    dt = (time.perf_counter() - t0) * 1000
+
+    errores = [it.error_abs for it in res.iteraciones if np.isfinite(it.error_abs)]
+    orden = _estimar_orden_convergencia(errores)
+
+    fp_x0 = None
+    try:
+        fp_x0 = float(fp_np(x0))
+    except Exception:
+        pass
+
+    analisis = []
+    analisis.append(f"**f'(x)** = ${sp.latex(sp.simplify(fp_expr))}$.")
+    if fp_x0 is not None:
+        analisis.append(
+            f"En x₀={fmt_decimal(x0)}: f'(x₀) = {fmt_decimal(fp_x0)} "
+            + ("(tangente con pendiente OK)." if abs(fp_x0) > 1e-10
+               else "**≈ 0 — la tangente es horizontal, el metodo no puede arrancar.**")
+        )
+    if res.convergio:
+        analisis.append(
+            "**Converge** — la formula x_{n+1} = x_n − f(x_n)/f'(x_n) usa la tangente "
+            "a la curva para saltar a la raiz."
+        )
+        if orden is not None:
+            tipo = ("cuadratica (raiz simple — ideal)" if abs(orden - 2) < 0.3
+                     else "lineal (raiz multiple — degrada a orden 1)" if abs(orden - 1) < 0.3
+                     else f"orden {fmt_decimal(orden, 2)}")
+            analisis.append(
+                f"**Orden empirico** p ≈ {fmt_decimal(orden, 3)} — {tipo} "
+                f"(teorico: 2 para raiz simple)."
+            )
+    else:
+        analisis.append(f"**No convergio**: {res.motivo_corte}.")
+
+    return ResultadoMetodo(
+        nombre="Newton-Raphson",
+        raiz=res.raiz,
+        iteraciones=len(res.iteraciones),
+        convergio=res.convergio,
+        motivo_corte=res.motivo_corte,
+        tiempo_ms=dt,
+        errores=errores,
+        analisis="  \n".join(analisis),
+        valor_f_raiz=float(f_np(res.raiz)) if res.raiz is not None else None,
+        extra={"fp_expr": fp_expr},
+    )
+
+
 def _plot_errores_superpuestos(resultados: list[ResultadoMetodo]) -> go.Figure:
     fig = go.Figure()
     for res in resultados:
@@ -226,8 +297,8 @@ def _plot_errores_superpuestos(resultados: list[ResultadoMetodo]) -> go.Figure:
 def render_comparacion() -> None:
     st.header("Comparacion de metodos")
     st.caption(
-        "Corre Biseccion + todos los candidatos de Punto Fijo sobre la misma f(x)=0 y "
-        "explica analiticamente por que cada uno da lo que da."
+        "Corre Biseccion + todos los candidatos de Punto Fijo + Newton-Raphson sobre la "
+        "misma f(x)=0 y explica analiticamente por que cada uno da lo que da."
     )
 
     cfg = get_config()
@@ -290,6 +361,8 @@ def render_comparacion() -> None:
 
     resultados.extend(_correr_punto_fijo(f_expr, x_sym, f_np, a, b, x0,
                                           tol, int(max_iter), precision_usada))
+    resultados.append(_correr_newton_raphson(f_expr, x_sym, f_np, x0,
+                                              tol, int(max_iter), precision_usada))
 
     # Resumen tabular
     st.subheader("Resumen comparativo")

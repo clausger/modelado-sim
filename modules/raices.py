@@ -9,11 +9,13 @@ import streamlit as st
 
 from modules.biseccion import render_biseccion
 from modules.punto_fijo import render_punto_fijo
+from modules.newton_raphson import render_newton_raphson
 from modules.comparacion_raices import render_comparacion
 
 SUBMODULOS = {
     "Biseccion": {"icon": "✂️", "wip": False},
     "Punto Fijo": {"icon": "🔁", "wip": False},
+    "Newton-Raphson": {"icon": "📐", "wip": False},
     "Comparacion": {"icon": "⚖️", "wip": False},
 }
 
@@ -33,5 +35,7 @@ def render() -> None:
         render_biseccion()
     elif nombre == "Punto Fijo":
         render_punto_fijo()
+    elif nombre == "Newton-Raphson":
+        render_newton_raphson()
     elif nombre == "Comparacion":
         render_comparacion()

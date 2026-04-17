@@ -366,6 +366,78 @@ def _tabla_dataframe(res: ResultadoPuntoFijo) -> pd.DataFrame:
     return pd.DataFrame(filas)
 
 
+# --- Aitken acceleration ---
+
+def aitken_acelerar(secuencia: list[float]) -> list[float | None]:
+    """Aplica la formula de Aitken a una sucesion iterativa.
+
+    x*_n = x_n − (x_{n+1} − x_n)^2 / (x_{n+2} − 2 x_{n+1} + x_n)
+
+    Devuelve lista del mismo largo que la secuencia; los ultimos 2 elementos
+    son None (hacen falta 3 terminos consecutivos para extrapolar).
+    """
+    n = len(secuencia)
+    resultado: list[float | None] = [None] * n
+    for i in range(n - 2):
+        x0, x1, x2 = secuencia[i], secuencia[i + 1], secuencia[i + 2]
+        denom = x2 - 2 * x1 + x0
+        if abs(denom) < 1e-14 or not np.isfinite(denom):
+            resultado[i] = None
+        else:
+            try:
+                val = x0 - (x1 - x0) ** 2 / denom
+                resultado[i] = float(val) if np.isfinite(val) else None
+            except Exception:
+                resultado[i] = None
+    return resultado
+
+
+def _tabla_con_aitken(res: ResultadoPuntoFijo, f_np=None) -> pd.DataFrame:
+    """Tabla con columna extra de sucesion acelerada y, opcional, f(x*_n) para monitorear."""
+    secuencia = [res.x0] + [it.g_xn for it in res.iteraciones]
+    acel = aitken_acelerar(secuencia)
+
+    filas = []
+    for idx, it in enumerate(res.iteraciones):
+        x_acel = acel[idx] if idx < len(acel) else None
+        fila = {
+            "n": it.n,
+            "x_n": it.x_n,
+            "x_n+1 = g(x_n)": it.g_xn,
+            "x*_n (Aitken)": x_acel,
+            "E_abs PF": it.error_abs,
+        }
+        if f_np is not None and x_acel is not None:
+            try:
+                fila["f(x*_n)"] = float(f_np(x_acel))
+            except Exception:
+                fila["f(x*_n)"] = None
+        filas.append(fila)
+    return pd.DataFrame(filas)
+
+
+def _plot_aitken_vs_pf(res: ResultadoPuntoFijo) -> go.Figure:
+    """Compara convergencia de la sucesion original PF vs la acelerada por Aitken."""
+    secuencia = [res.x0] + [it.g_xn for it in res.iteraciones]
+    acel = aitken_acelerar(secuencia)
+
+    ns_pf = list(range(len(secuencia)))
+    ns_ait = [i for i, v in enumerate(acel) if v is not None]
+    xs_ait = [acel[i] for i in ns_ait]
+
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(x=ns_pf, y=secuencia, mode="lines+markers",
+                              name="x_n (PF)", line=dict(color="#ff7f0e")))
+    fig.add_trace(go.Scatter(x=ns_ait, y=xs_ait, mode="lines+markers",
+                              name="x*_n (Aitken)", line=dict(color="#9467bd")))
+    if res.raiz is not None:
+        fig.add_hline(y=res.raiz, line=dict(color="green", dash="dash"),
+                       annotation_text=f"punto fijo ≈ {fmt_decimal(res.raiz)}")
+    fig.update_layout(title="PF vs Aitken — convergencia",
+                      xaxis_title="n", yaxis_title="valor", height=380)
+    return fig
+
+
 # --- Render principal ---
 
 def render_punto_fijo() -> None:
@@ -553,13 +625,50 @@ def render_punto_fijo() -> None:
     col_n.metric("Iteraciones", len(res.iteraciones))
     col_e.metric("|g(x*)−x*|", fmt_decimal(res.iteraciones[-1].error_abs))
 
+    # Toggle Aitken
+    usar_aitken = st.checkbox(
+        "Acelerar con Aitken (agrega columna x*_n y comparacion de convergencia)",
+        value=False, key="pf_aitken",
+        help="Aitken extrapola 3 terminos consecutivos de la sucesion para acelerar "
+              "la convergencia cuando es lineal (pg 13-14).",
+    )
+
     tab_resumen, tab_pasos, tab_viz = st.tabs(["Resumen", "Paso a paso", "Visualizaciones"])
 
     with tab_resumen:
-        df = _tabla_dataframe(res)
-        resaltar = resaltar_tolerancia("E_abs", criterios.tol_abs) if criterios.usar_abs else None
-        render_tabla_iteraciones(df, resaltar=resaltar,
-                                  titulo="Tabla de iteraciones", key_export="punto_fijo")
+        if usar_aitken:
+            df = _tabla_con_aitken(res, f_np=None)
+            render_tabla_iteraciones(
+                df, titulo="Tabla de iteraciones con aceleracion Aitken",
+                key_export="punto_fijo_aitken",
+            )
+            # Ganancia de Aitken: comparar iteraciones para alcanzar tolerancia
+            secuencia = [res.x0] + [it.g_xn for it in res.iteraciones]
+            acel = aitken_acelerar(secuencia)
+            if res.raiz is not None:
+                n_pf = len(res.iteraciones)
+                n_ait = next(
+                    (i for i, v in enumerate(acel)
+                      if v is not None and abs(v - res.raiz) <= criterios.tol_abs),
+                    None,
+                )
+                if n_ait is not None:
+                    ahorro = n_pf - (n_ait + 1)
+                    st.info(
+                        f"**Aitken alcanza tol {criterios.tol_abs:g} en iteracion "
+                        f"{n_ait + 1} vs {n_pf} del PF original. "
+                        f"Ahorro: {ahorro} iteraciones.**"
+                    )
+                else:
+                    st.info(
+                        "Aitken no alcanzo la tolerancia antes que PF — puede pasar si "
+                        "la sucesion ya converge rapido o si el denominador se vuelve chico."
+                    )
+        else:
+            df = _tabla_dataframe(res)
+            resaltar = resaltar_tolerancia("E_abs", criterios.tol_abs) if criterios.usar_abs else None
+            render_tabla_iteraciones(df, resaltar=resaltar,
+                                      titulo="Tabla de iteraciones", key_export="punto_fijo")
 
     with tab_pasos:
         n_pasos = st.slider("Iteraciones a explicar", 1, min(10, len(res.iteraciones)),
@@ -573,6 +682,8 @@ def render_punto_fijo() -> None:
             st.plotly_chart(_plot_convergencia(res), use_container_width=True)
         with col_g2:
             st.plotly_chart(_plot_error(res), use_container_width=True)
+        if usar_aitken:
+            st.plotly_chart(_plot_aitken_vs_pf(res), use_container_width=True)
 
     if cfg.mostrar_glosario:
         render_glosario_expander(
