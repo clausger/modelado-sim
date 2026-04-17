@@ -74,7 +74,9 @@ def _render_un_paso(paso: Paso, numero: int, tema: str) -> None:
             if paso.explicacion_coloquial:
                 st.markdown(paso.explicacion_coloquial)
 
-    for nota in paso.notas:
+    # Tolera notas como string unico o iterable de strings
+    notas = (paso.notas,) if isinstance(paso.notas, str) else paso.notas
+    for nota in notas:
         st.info(nota)
 
     st.divider()

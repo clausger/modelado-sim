@@ -284,7 +284,7 @@ def _construir_pasos(res: ResultadoNR, fp_latex: str, n_pasos: int = 3) -> list[
                 "La tangente tiene que tener pendiente. Si f' da 0, la recta no corta "
                 "el eje x y no sabemos para donde saltar."
             ),
-            notas=rf"f'(x) = {fp_latex}",
+            notas=(rf"$f'(x) = {fp_latex}$",),
         ))
 
     for it in res.iteraciones[:n_pasos]:
