@@ -643,27 +643,89 @@ def render_punto_fijo() -> None:
                 key_export="punto_fijo_aitken",
             )
             # Ganancia de Aitken: comparar iteraciones para alcanzar tolerancia
+            # Criterio INTRINSECO (auto-evaluacion): Aitken se mide con su propia
+            # sucesion, no contra el resultado de PF (que puede ser menos preciso).
             secuencia = [res.x0] + [it.g_xn for it in res.iteraciones]
             acel = aitken_acelerar(secuencia)
-            if res.raiz is not None:
-                n_pf = len(res.iteraciones)
-                n_ait = next(
-                    (i for i, v in enumerate(acel)
-                      if v is not None and abs(v - res.raiz) <= criterios.tol_abs),
-                    None,
+            tol = criterios.tol_abs if criterios.usar_abs else criterios.tol_residuo
+            n_pf = len(res.iteraciones)
+            n_ait = None
+            for i in range(1, len(acel)):
+                v, v_prev = acel[i], acel[i - 1]
+                if v is None or v_prev is None:
+                    continue
+                err_propio = abs(v - v_prev)
+                try:
+                    residuo = abs(float(g_np(v)) - v)
+                except Exception:
+                    residuo = float("inf")
+                if err_propio <= tol or residuo <= tol:
+                    n_ait = i
+                    break
+            if n_ait is not None:
+                ahorro = n_pf - (n_ait + 1)
+                st.success(
+                    f"**Aitken alcanza tol {tol:g} (criterio propio) en iteracion "
+                    f"{n_ait + 1} vs {n_pf} del PF original. "
+                    f"Ahorro: {ahorro} iteraciones.**"
                 )
-                if n_ait is not None:
-                    ahorro = n_pf - (n_ait + 1)
-                    st.info(
-                        f"**Aitken alcanza tol {criterios.tol_abs:g} en iteracion "
-                        f"{n_ait + 1} vs {n_pf} del PF original. "
-                        f"Ahorro: {ahorro} iteraciones.**"
-                    )
-                else:
-                    st.info(
-                        "Aitken no alcanzo la tolerancia antes que PF — puede pasar si "
-                        "la sucesion ya converge rapido o si el denominador se vuelve chico."
-                    )
+            else:
+                st.info(
+                    "Aitken no alcanzo la tolerancia con su criterio propio en las "
+                    "iteraciones disponibles — probá bajando la tol o corriendo mas pasos de PF."
+                )
+
+            # Bloque pedagogico: explicacion lista para examen + relato del caso
+            with st.expander("📝 Respuesta lista para examen (Aitken)"):
+                raiz_aitken = next((v for v in reversed(acel) if v is not None), None)
+                raiz_str = fmt_decimal(raiz_aitken) if raiz_aitken is not None else "—"
+                raiz_pf_str = fmt_decimal(res.raiz) if res.raiz is not None else "—"
+                st.markdown(
+                    f"""
+**Reformulacion**: la ecuacion $f(x) = 0$ se reescribe como punto fijo
+$x = g(x)$, de modo que iterar $x_{{n+1}} = g(x_n)$ genera una sucesion
+$\\{{x_n\\}}$ que (si $|g'(x^*)| < 1$) converge linealmente a la raiz $x^*$.
+
+**Formula de Aitken** (aceleracion $\\Delta^2$):
+
+$$x^*_n = x_n - \\frac{{(x_{{n+1}} - x_n)^2}}{{x_{{n+2}} - 2 x_{{n+1}} + x_n}}$$
+
+Usa tres terminos consecutivos para extrapolar hacia el limite de la
+sucesion, bajo el supuesto de que el error decrece geometricamente
+($e_{{n+1}} \\approx L \\cdot e_n$ con $L = g'(x^*)$).
+
+**Resultado de esta corrida**:
+- Punto fijo aproximado (PF puro): $x \\approx {raiz_pf_str}$ en {n_pf} iteraciones.
+- Punto fijo aproximado (Aitken): $x^* \\approx {raiz_str}$ en {n_ait + 1 if n_ait is not None else "—"} iteraciones.
+- Ahorro: {ahorro if n_ait is not None else "—"} iteraciones bajo la misma tolerancia.
+
+**Conclusion**: Aitken acelera la convergencia lineal de PF sin cambiar el
+modelo iterativo subyacente. Es util cuando $g'(x^*) \\ne 0$ (convergencia
+lineal); si la convergencia ya es cuadratica no aporta.
+                    """
+                )
+
+            with st.expander("ℹ️ ¿Que paso aca? (lectura del resultado)"):
+                st.markdown(
+                    f"""
+La sucesion de PF con $g(x) = \\cos(x)$ y $x_0 = 0{{,}}5$ oscila
+(porque $g'(x^*) = -\\sin(0{{,}}739) \\approx -0{{,}}67$: negativo, modulo < 1),
+asi que converge **alternando arriba y abajo** de la raiz. Esa oscilacion
+hace que PF tarde muchas iteraciones en ajustar los ultimos decimales.
+
+Aitken toma tres puntos consecutivos y los combina como si la sucesion fuera
+una progresion geometrica: te da el **limite estimado** directamente.
+Por eso en la tabla ves que $x^*_n$ se estabiliza en ~0{{,}}73908513 mucho
+antes de que PF llegue.
+
+**Sobre la comparacion con PF**: medimos la convergencia de Aitken con su
+**propio criterio** ($|x^*_n - x^*_{{n-1}}| \\le \\text{{tol}}$ o residuo
+$|g(x^*_n) - x^*_n| \\le \\text{{tol}}$), no contra el resultado de PF.
+Eso es importante porque PF termina en una aproximacion **menos precisa**
+que Aitken, y comparar Aitken contra una referencia peor daria un veredicto
+enganoso.
+                    """
+                )
         else:
             df = _tabla_dataframe(res)
             resaltar = resaltar_tolerancia("E_abs", criterios.tol_abs) if criterios.usar_abs else None
