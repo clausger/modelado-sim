@@ -7,6 +7,7 @@ import sympy as sp
 from utils.errores import error_absoluto, error_relativo
 from utils.graficos import plot_comparacion_barras, plot_funcion
 from utils.math_keyboard import math_input, parse_expr_to_float, parse_latex
+from utils.ui.tablas import fmt_decimal
 
 
 def _valor_exacto(expr, x_sym, a: float, b: float):
@@ -208,7 +209,7 @@ def _mostrar_resultados(resultado: float, valor_exacto, n_dec: int,
         cols[1].metric("Valor exacto (SymPy)", f"{valor_exacto:.{n_dec}f}")
         ea = error_absoluto(resultado, valor_exacto)
         er = error_relativo(resultado, valor_exacto)
-        cols[2].metric("Error absoluto", f"{ea:.2e}", delta=f"relativo: {er:.2e}", delta_color="off")
+        cols[2].metric("Error absoluto", fmt_decimal(ea), delta=f"relativo: {fmt_decimal(er)}", delta_color="off")
 
     # Tabla de iteraciones
     st.markdown("#### Tabla de puntos de evaluacion")
@@ -492,8 +493,8 @@ def _comparacion():
         df = pd.DataFrame(filas)
         formato = {"Resultado": f"{{:.{n_dec}f}}"}
         if valor_exacto is not None:
-            formato["Error absoluto"] = "{:.2e}"
-            formato["Error relativo"] = "{:.2e}"
+            formato["Error absoluto"] = lambda v: fmt_decimal(v)
+            formato["Error relativo"] = lambda v: fmt_decimal(v)
         st.dataframe(df.style.format(formato), use_container_width=True)
 
         # Grafico de barras de errores
