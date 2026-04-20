@@ -186,17 +186,17 @@ def biseccion(
         # Chequear criterios (el primero que se cumple corta)
         if criterios.usar_residuo and abs(fc) <= criterios.tol_residuo:
             res.raiz = c
-            res.motivo_corte = f"|f(c)| ≤ {criterios.tol_residuo:g} (residuo)"
+            res.motivo_corte = f"|f(c)| ≤ {fmt_decimal(criterios.tol_residuo)} (residuo)"
             res.convergio = True
             break
         if criterios.usar_abs and c_prev is not None and err_abs <= criterios.tol_abs:
             res.raiz = c
-            res.motivo_corte = f"|c_n − c_(n−1)| ≤ {criterios.tol_abs:g} (error absoluto)"
+            res.motivo_corte = f"|c_n − c_(n−1)| ≤ {fmt_decimal(criterios.tol_abs)} (error absoluto)"
             res.convergio = True
             break
         if criterios.usar_rel and c_prev is not None and err_rel <= criterios.tol_rel:
             res.raiz = c
-            res.motivo_corte = f"error relativo ≤ {criterios.tol_rel:g}"
+            res.motivo_corte = f"error relativo ≤ {fmt_decimal(criterios.tol_rel)}"
             res.convergio = True
             break
 

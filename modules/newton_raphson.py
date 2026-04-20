@@ -169,17 +169,17 @@ def newton_raphson(
 
         if criterios.usar_residuo and abs(f_xn) <= criterios.tol_residuo:
             res.raiz = x_next
-            res.motivo_corte = f"|f(x)| ≤ {criterios.tol_residuo:g} (residuo)"
+            res.motivo_corte = f"|f(x)| ≤ {fmt_decimal(criterios.tol_residuo)} (residuo)"
             res.convergio = True
             return res
         if criterios.usar_abs and err_abs <= criterios.tol_abs:
             res.raiz = x_next
-            res.motivo_corte = f"|x_n+1 − x_n| ≤ {criterios.tol_abs:g} (error absoluto)"
+            res.motivo_corte = f"|x_n+1 − x_n| ≤ {fmt_decimal(criterios.tol_abs)} (error absoluto)"
             res.convergio = True
             return res
         if criterios.usar_rel and err_rel <= criterios.tol_rel:
             res.raiz = x_next
-            res.motivo_corte = f"error relativo ≤ {criterios.tol_rel:g}"
+            res.motivo_corte = f"error relativo ≤ {fmt_decimal(criterios.tol_rel)}"
             res.convergio = True
             return res
 

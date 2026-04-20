@@ -207,17 +207,17 @@ def punto_fijo(
 
         if criterios.usar_abs and err_abs <= criterios.tol_abs:
             res.raiz = g_xn
-            res.motivo_corte = f"|x_n+1 − x_n| ≤ {criterios.tol_abs:g} (error absoluto)"
+            res.motivo_corte = f"|x_n+1 − x_n| ≤ {fmt_decimal(criterios.tol_abs)} (error absoluto)"
             res.convergio = True
             return res
         if criterios.usar_rel and err_rel <= criterios.tol_rel:
             res.raiz = g_xn
-            res.motivo_corte = f"error relativo ≤ {criterios.tol_rel:g}"
+            res.motivo_corte = f"error relativo ≤ {fmt_decimal(criterios.tol_rel)}"
             res.convergio = True
             return res
         if criterios.usar_residuo and err_abs <= criterios.tol_residuo:
             res.raiz = g_xn
-            res.motivo_corte = f"|g(x) − x| ≤ {criterios.tol_residuo:g} (residuo)"
+            res.motivo_corte = f"|g(x) − x| ≤ {fmt_decimal(criterios.tol_residuo)} (residuo)"
             res.convergio = True
             return res
 
@@ -665,7 +665,7 @@ def render_punto_fijo() -> None:
             if n_ait is not None:
                 ahorro = n_pf - (n_ait + 1)
                 st.success(
-                    f"**Aitken alcanza tol {tol:g} (criterio propio) en iteracion "
+                    f"**Aitken alcanza tol {fmt_decimal(tol)} (criterio propio) en iteracion "
                     f"{n_ait + 1} vs {n_pf} del PF original. "
                     f"Ahorro: {ahorro} iteraciones.**"
                 )
