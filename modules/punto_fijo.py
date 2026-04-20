@@ -105,24 +105,83 @@ class ResultadoPuntoFijo:
 # --- Asistente de reformulacion ---
 
 def generar_reformulaciones(f_expr: sp.Expr, x: sp.Symbol) -> list[tuple[str, sp.Expr]]:
-    """Genera hasta 4 g(x) candidatos para x = g(x) a partir de f(x)=0."""
+    """Genera g(x) candidatos para x = g(x) a partir de f(x)=0.
+
+    Estrategias:
+      1. g(x) = x + f(x)  (Picard positivo)
+      2. g(x) = x - f(x)  (Picard negativo)
+      3. g(x) = x - f(x)/f'(x)  (tipo Newton)
+      4. Despeje por termino: para cada termino t(x) que contenga x, intenta
+         aislar t = -resto y despejar x. Util para f con x^n: x = (-resto)^(1/n).
+    """
     candidatos: list[tuple[str, sp.Expr]] = []
+    vistos: set[str] = set()
+
+    def _agregar(nombre: str, expr: sp.Expr) -> None:
+        try:
+            simp = sp.simplify(expr)
+        except Exception:
+            simp = expr
+        key = sp.srepr(simp)
+        if key in vistos:
+            return
+        vistos.add(key)
+        candidatos.append((nombre, simp))
+
+    # Picard +/-
     try:
-        g1 = sp.simplify(x + f_expr)
-        candidatos.append((r"g_1(x) = x + f(x)", g1))
+        _agregar(r"g_1(x) = x + f(x)", x + f_expr)
     except Exception:
         pass
     try:
-        g2 = sp.simplify(x - f_expr)
-        candidatos.append((r"g_2(x) = x - f(x)", g2))
+        _agregar(r"g_2(x) = x - f(x)", x - f_expr)
     except Exception:
         pass
+
+    # Tipo Newton
     try:
         df = sp.diff(f_expr, x)
-        g_newton = sp.simplify(x - f_expr / df)
-        candidatos.append((r"g_3(x) = x - f(x)/f'(x) \; (\text{tipo Newton})", g_newton))
+        _agregar(r"g_3(x) = x - f(x)/f'(x) \; (\text{tipo Newton})", x - f_expr / df)
     except Exception:
         pass
+
+    # Despeje por termino dominante: x^n = -resto(x) => x = (-resto)^(1/n)
+    try:
+        f_exp = sp.expand(f_expr)
+        terminos = f_exp.args if isinstance(f_exp, sp.Add) else [f_exp]
+        for idx, t in enumerate(terminos):
+            if not t.has(x):
+                continue
+            # Buscamos el exponente de x en el termino: coef * x^n (n entero positivo)
+            coef, poly_part = t.as_coeff_Mul()
+            exponent = None
+            base_sym = None
+            if poly_part == x:
+                exponent = 1
+                base_sym = x
+            elif isinstance(poly_part, sp.Pow) and poly_part.base == x \
+                    and poly_part.exp.is_number and poly_part.exp.is_positive:
+                try:
+                    exponent = int(poly_part.exp)
+                    base_sym = x
+                except (TypeError, ValueError):
+                    continue
+            if exponent is None or exponent < 1:
+                continue
+            # resto = f_expr - t, entonces t = -resto => x^exponent = -resto/coef
+            resto = sp.simplify(f_exp - t)
+            rhs = sp.simplify(-resto / coef)
+            # g(x) = rhs^(1/exponent) — si exponent=1, g(x) = rhs directo
+            if exponent == 1:
+                nombre = rf"g_{{desp{idx}}}(x) = -({sp.latex(resto)})/({sp.latex(coef)})"
+                _agregar(nombre, rhs)
+            else:
+                nombre = rf"g_{{desp{idx}}}(x) = \sqrt[{exponent}]{{{sp.latex(rhs)}}}"
+                g_desp = rhs ** sp.Rational(1, exponent)
+                _agregar(nombre, g_desp)
+    except Exception:
+        pass
+
     return candidatos
 
 
@@ -393,19 +452,28 @@ def aitken_acelerar(secuencia: list[float]) -> list[float | None]:
 
 
 def _tabla_con_aitken(res: ResultadoPuntoFijo, f_np=None) -> pd.DataFrame:
-    """Tabla con columna extra de sucesion acelerada y, opcional, f(x*_n) para monitorear."""
+    """Tabla con columna extra de sucesion acelerada + errores propios de Aitken."""
     secuencia = [res.x0] + [it.g_xn for it in res.iteraciones]
     acel = aitken_acelerar(secuencia)
 
     filas = []
+    x_acel_prev = None
     for idx, it in enumerate(res.iteraciones):
         x_acel = acel[idx] if idx < len(acel) else None
+        if x_acel is not None and x_acel_prev is not None:
+            e_abs_ait = abs(x_acel - x_acel_prev)
+            e_rel_ait = e_abs_ait / abs(x_acel) if x_acel != 0 else float("inf")
+        else:
+            e_abs_ait = None
+            e_rel_ait = None
         fila = {
             "n": it.n,
             "x_n": it.x_n,
             "x_n+1 = g(x_n)": it.g_xn,
             "x*_n (Aitken)": x_acel,
             "E_abs PF": it.error_abs,
+            "E_abs Aitken": e_abs_ait,
+            "E_rel Aitken": e_rel_ait,
         }
         if f_np is not None and x_acel is not None:
             try:
@@ -413,6 +481,134 @@ def _tabla_con_aitken(res: ResultadoPuntoFijo, f_np=None) -> pd.DataFrame:
             except Exception:
                 fila["f(x*_n)"] = None
         filas.append(fila)
+        if x_acel is not None:
+            x_acel_prev = x_acel
+    return pd.DataFrame(filas)
+
+
+# --- Steffensen (Aitken como iteracion: reinicia cada ciclo desde x*) ---
+
+@dataclass(frozen=True)
+class CicloSteffensen:
+    ciclo: int
+    x_n: float
+    x_n1: float
+    x_n2: float
+    x_star: float
+    error_abs: float
+    error_rel: float
+
+
+@dataclass
+class ResultadoSteffensen:
+    ciclos: list[CicloSteffensen] = field(default_factory=list)
+    raiz: float | None = None
+    motivo_corte: str = ""
+    convergio: bool = False
+    x0: float = 0.0
+
+
+def steffensen(
+    g_np,
+    x0: float,
+    criterios: CriteriosDetencion,
+    precision: int | None = None,
+) -> ResultadoSteffensen:
+    """Steffensen: Aitken aplicado dentro del loop (reinicia cada ciclo).
+
+    Cada ciclo:
+      x_{n+1} = g(x_n)
+      x_{n+2} = g(x_{n+1})
+      x* = x_n - (x_{n+1} - x_n)^2 / (x_{n+2} - 2 x_{n+1} + x_n)
+      -> nueva semilla = x*
+
+    Convergencia cuadratica (como Newton) cuando g es suficientemente suave.
+    """
+    def r(v: float) -> float:
+        return round(v, precision) if precision is not None else v
+
+    res = ResultadoSteffensen(x0=x0)
+    n_max = criterios.max_iter if criterios.usar_max_iter else 10_000
+    x_n = r(x0)
+    x_star_prev = x_n
+
+    for ciclo in range(1, n_max + 1):
+        try:
+            x_n1 = r(float(g_np(x_n)))
+            x_n2 = r(float(g_np(x_n1)))
+        except Exception as e:
+            res.motivo_corte = f"Error al evaluar g en ciclo {ciclo}: {e}"
+            return res
+
+        if not np.isfinite(x_n1) or not np.isfinite(x_n2):
+            res.motivo_corte = f"g(x) no finito en ciclo {ciclo}. Divergencia."
+            return res
+
+        denom = x_n2 - 2 * x_n1 + x_n
+        if abs(denom) < 1e-14:
+            # Si el denominador se anula, x* no esta definido: adoptamos x_n2.
+            x_star = x_n2
+        else:
+            x_star = r(x_n - (x_n1 - x_n) ** 2 / denom)
+
+        if not np.isfinite(x_star):
+            res.motivo_corte = f"x* no finito en ciclo {ciclo}. Divergencia."
+            return res
+
+        err_abs = abs(x_star - x_star_prev)
+        err_rel = err_abs / abs(x_star) if x_star != 0 else float("inf")
+
+        res.ciclos.append(CicloSteffensen(
+            ciclo=ciclo, x_n=x_n, x_n1=x_n1, x_n2=x_n2,
+            x_star=x_star, error_abs=err_abs, error_rel=err_rel,
+        ))
+
+        # Criterios de parada (aplicados sobre la sucesion acelerada x*)
+        if criterios.usar_abs and err_abs <= criterios.tol_abs and ciclo > 1:
+            res.raiz = x_star
+            res.motivo_corte = f"|x*_k − x*_{{k-1}}| ≤ {fmt_decimal(criterios.tol_abs)} (error absoluto)"
+            res.convergio = True
+            return res
+        if criterios.usar_rel and err_rel <= criterios.tol_rel and ciclo > 1:
+            res.raiz = x_star
+            res.motivo_corte = f"error relativo Aitken ≤ {fmt_decimal(criterios.tol_rel)}"
+            res.convergio = True
+            return res
+        if criterios.usar_residuo:
+            try:
+                residuo = abs(float(g_np(x_star)) - x_star)
+                if residuo <= criterios.tol_residuo:
+                    res.raiz = x_star
+                    res.motivo_corte = f"|g(x*) − x*| ≤ {fmt_decimal(criterios.tol_residuo)} (residuo)"
+                    res.convergio = True
+                    return res
+            except Exception:
+                pass
+
+        if abs(x_star) > 1e12:
+            res.motivo_corte = f"Divergencia: |x*| = {abs(x_star):.2e}"
+            return res
+
+        x_n = x_star
+        x_star_prev = x_star
+
+    res.raiz = x_n
+    res.motivo_corte = f"Se alcanzo el maximo de iteraciones (N_max = {criterios.max_iter})"
+    return res
+
+
+def _tabla_steffensen(res: ResultadoSteffensen) -> pd.DataFrame:
+    filas = []
+    for c in res.ciclos:
+        filas.append({
+            "ciclo": c.ciclo,
+            "x_n": c.x_n,
+            "x_n+1 = g(x_n)": c.x_n1,
+            "x_n+2 = g(x_n+1)": c.x_n2,
+            "x* (Δ²)": c.x_star,
+            "E_abs": c.error_abs,
+            "E_rel": c.error_rel,
+        })
     return pd.DataFrame(filas)
 
 
@@ -625,13 +821,23 @@ def render_punto_fijo() -> None:
     col_n.metric("Iteraciones", len(res.iteraciones))
     col_e.metric("|g(x*)−x*|", fmt_decimal(res.iteraciones[-1].error_abs))
 
-    # Toggle Aitken
-    usar_aitken = st.checkbox(
-        "Acelerar con Aitken (agrega columna x*_n y comparacion de convergencia)",
-        value=False, key="pf_aitken",
-        help="Aitken extrapola 3 terminos consecutivos de la sucesion para acelerar "
-              "la convergencia cuando es lineal (pg 13-14).",
+    # Selector de aceleracion: ninguna / Aitken post-proceso / Steffensen
+    modo_acel = st.radio(
+        "Aceleracion de la convergencia",
+        ["Ninguna", "Aitken (post-proceso)", "Steffensen (reinicia desde x*)"],
+        index=0, horizontal=True, key="pf_modo_acel",
+        help=(
+            "Aitken: corre PF puro, luego calcula x*_n = Δ²(x_n, x_{n+1}, x_{n+2}) como post-proceso. "
+            "Steffensen: reemplaza cada tripleta por x* como nueva semilla — convergencia cuadratica."
+        ),
     )
+    usar_aitken = (modo_acel == "Aitken (post-proceso)")
+    usar_steffensen = (modo_acel == "Steffensen (reinicia desde x*)")
+
+    # Si es Steffensen: corre el algoritmo aparte (reinicia cada ciclo).
+    res_steff: ResultadoSteffensen | None = None
+    if usar_steffensen:
+        res_steff = steffensen(g_np, x0, criterios, precision=precision_usada)
 
     tab_resumen, tab_pasos, tab_viz = st.tabs(["Resumen", "Paso a paso", "Visualizaciones"])
 
@@ -724,6 +930,62 @@ $|g(x^*_n) - x^*_n| \\le \\text{{tol}}$), no contra el resultado de PF.
 Eso es importante porque PF termina en una aproximacion **menos precisa**
 que Aitken, y comparar Aitken contra una referencia peor daria un veredicto
 enganoso.
+                    """
+                )
+        elif usar_steffensen and res_steff is not None:
+            # Render resultado de Steffensen
+            if res_steff.convergio:
+                st.success(f"Steffensen convergio — {res_steff.motivo_corte}")
+            else:
+                st.warning(f"Steffensen NO convergio — {res_steff.motivo_corte}")
+
+            col_rs, col_ns, col_es = st.columns(3)
+            col_rs.metric("Raiz (Steffensen)", fmt_decimal(res_steff.raiz))
+            col_ns.metric("Ciclos", len(res_steff.ciclos))
+            col_es.metric("E_abs final",
+                           fmt_decimal(res_steff.ciclos[-1].error_abs if res_steff.ciclos else None))
+
+            df_steff = _tabla_steffensen(res_steff)
+            resaltar_s = resaltar_tolerancia("E_abs", criterios.tol_abs) if criterios.usar_abs else None
+            render_tabla_iteraciones(
+                df_steff, resaltar=resaltar_s,
+                titulo="Tabla de ciclos Steffensen",
+                key_export="steffensen",
+            )
+
+            with st.expander("📝 Respuesta lista para examen (Steffensen)"):
+                raiz_s = fmt_decimal(res_steff.raiz) if res_steff.raiz is not None else "—"
+                raiz_pf_s = fmt_decimal(res.raiz) if res.raiz is not None else "—"
+                n_pf_s = len(res.iteraciones)
+                n_s = len(res_steff.ciclos)
+                evaluaciones_s = 2 * n_s  # Steffensen hace 2 eval de g por ciclo
+                st.markdown(
+                    f"""
+**Metodo de Steffensen** (Aitken como iteracion): cada ciclo parte de una
+semilla $x_n$, computa $x_{{n+1}} = g(x_n)$ y $x_{{n+2}} = g(x_{{n+1}})$,
+y reemplaza la sucesion completa por la estimacion $\\Delta^2$:
+
+$$x^* = x_n - \\frac{{(x_{{n+1}} - x_n)^2}}{{x_{{n+2}} - 2 x_{{n+1}} + x_n}}$$
+
+La nueva semilla del ciclo siguiente es $x^*$. A diferencia de Aitken
+clasico (post-proceso), Steffensen **reinicia** la iteracion usando la
+estimacion acelerada, lo que cambia el orden de convergencia de lineal
+a **cuadratico** (como Newton) cuando $g$ es $C^2$ cerca del punto fijo.
+
+**Resultado de esta corrida**:
+- PF puro: $x \\approx {raiz_pf_s}$ en {n_pf_s} iteraciones ({n_pf_s} evaluaciones de $g$).
+- Steffensen: $x^* \\approx {raiz_s}$ en {n_s} ciclos ({evaluaciones_s} evaluaciones de $g$).
+- Criterio de parada: $|x^*_k - x^*_{{k-1}}| \\le \\text{{tol}}$ (propio de la sucesion acelerada).
+
+**Comparacion**:
+- Convergencia teorica: PF = lineal ($O(L^n)$ con $L = |g'(x^*)|$).
+- Steffensen = cuadratica ($O(e_n^2)$) mientras $g$ sea suave y $g'(x^*) \\ne 1$.
+- Costo por ciclo: Steffensen evalua $g$ dos veces, asi que un ciclo cuesta
+  2 pasos de PF. Aun asi, la reduccion de error por ciclo compensa largamente.
+
+**Conclusion**: Steffensen es la opcion recomendada cuando querés convergencia
+cuadratica sin calcular derivadas (no necesita $f'$ como Newton). Pedagogicamente,
+es el puente natural entre PF y Newton.
                     """
                 )
         else:
