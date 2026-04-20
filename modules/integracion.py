@@ -507,12 +507,12 @@ def _comparacion():
             fig_bar.add_trace(go.Bar(
                 x=nombres_list, y=errores_list,
                 marker_color=colores[:len(nombres_list)],
-                text=[f"{e:.2e}" for e in errores_list],
+                text=[fmt_decimal(e) for e in errores_list],
                 textposition="auto",
             ))
             fig_bar.update_layout(
                 template="plotly_dark",
-                yaxis_title="Error absoluto", yaxis_type="log",
+                yaxis_title="Error absoluto (escala log)", yaxis_type="log",
                 margin=dict(l=40, r=20, t=30, b=40),
             )
             st.plotly_chart(fig_bar, use_container_width=True)
@@ -562,6 +562,107 @@ def _comparacion():
             margin=dict(l=40, r=20, t=30, b=40),
         )
         st.plotly_chart(fig_conv, use_container_width=True)
+
+        # Grafico log-log de error vs n — muestra pendientes del orden teorico
+        if valor_exacto is not None:
+            st.markdown("#### Error absoluto vs n (log-log)")
+            st.caption(
+                "La pendiente de cada recta coincide con el orden del metodo: "
+                "-2 para Rectangulo/Trapecio (O(h²)), -4 para Simpson (O(h⁴)). "
+                "Duplicar n reduce el error ×4 en Trapecio pero ×16 en Simpson."
+            )
+            ns_log = []
+            nv = 4
+            while nv <= max(n, 64):
+                ns_log.append(nv)
+                nv *= 2
+            fig_loglog = go.Figure()
+            for nombre, (fn, _) in metodos.items():
+                errs = []
+                ns_plot = []
+                for nv in ns_log:
+                    if nombre == "Simpson 1/3":
+                        nv_adj = nv if nv % 2 == 0 else nv + 1
+                    elif nombre == "Simpson 3/8":
+                        nv_adj = round(nv / 3) * 3
+                        if nv_adj < 3:
+                            nv_adj = 3
+                    else:
+                        nv_adj = nv
+                    res, *_ = fn(f_np, a, b, nv_adj)
+                    err = error_absoluto(res, valor_exacto)
+                    if err > 0:
+                        errs.append(err)
+                        ns_plot.append(nv_adj)
+                fig_loglog.add_trace(go.Scatter(
+                    x=ns_plot, y=errs, mode="lines+markers", name=nombre,
+                    line=dict(color=colores_linea[nombre], width=2),
+                    marker=dict(size=6),
+                ))
+            fig_loglog.update_layout(
+                template="plotly_dark",
+                xaxis_title="n (subintervalos)", yaxis_title="|error|",
+                xaxis_type="log", yaxis_type="log",
+                margin=dict(l=40, r=20, t=30, b=40),
+            )
+            st.plotly_chart(fig_loglog, use_container_width=True)
+
+        # Analisis dinamico lista para examen
+        if valor_exacto is not None:
+            errores_map = {m: error_absoluto(resultados[m], valor_exacto)
+                             for m in resultados}
+            ganador = min(errores_map, key=errores_map.get)
+            peor = max(errores_map, key=errores_map.get)
+            ratio = errores_map[peor] / errores_map[ganador] if errores_map[ganador] > 0 else float("inf")
+            cumple_tol = {m: (error_relativo(resultados[m], valor_exacto) <= tol)
+                            for m in resultados}
+            cumplen = [m for m, ok in cumple_tol.items() if ok]
+            no_cumplen = [m for m, ok in cumple_tol.items() if not ok]
+
+            with st.expander("📝 Respuesta lista para examen (analisis)"):
+                tol_pct = tol * 100
+                linea_cumplen = (
+                    f"**Con tolerancia del {tol_pct:.2f}%** cumplieron: "
+                    f"{', '.join(cumplen) if cumplen else 'ninguno'}."
+                )
+                linea_no_cumplen = (
+                    f"No cumplieron: {', '.join(no_cumplen)}." if no_cumplen else ""
+                )
+                st.markdown(
+                    f"""
+**Valor exacto**: $I = {fmt_decimal(valor_exacto)}$ (via SymPy).
+
+**Resultados numericos**:
+"""
+                )
+                for nombre, res in resultados.items():
+                    err_abs = errores_map[nombre]
+                    err_rel_pct = error_relativo(res, valor_exacto) * 100
+                    st.markdown(
+                        f"- **{nombre}** (n={metodos[nombre][1]}, {ordenes[nombre]}): "
+                        f"$I \\approx {fmt_decimal(res)}$ — "
+                        f"error abs = {fmt_decimal(err_abs)}, "
+                        f"error rel = {err_rel_pct:.4f}%"
+                    )
+                st.markdown(
+                    f"""
+{linea_cumplen} {linea_no_cumplen}
+
+**Comparacion de velocidad de convergencia**:
+- **Ganador en precision**: {ganador} con error {fmt_decimal(errores_map[ganador])}.
+- **Peor**: {peor} con error {fmt_decimal(errores_map[peor])}.
+- Ratio de precision: {fmt_decimal(ratio)} veces (Simpson reduce el error
+  con pendiente $-4$ en log-log vs $-2$ de Rectangulo/Trapecio, asi que
+  cada vez que duplicas n, Simpson mejora $\\times 16$ mientras que
+  Rectangulo/Trapecio mejoran solo $\\times 4$).
+
+**Conclusion**: para la misma cantidad de evaluaciones, Simpson es mas
+preciso porque integra exactamente polinomios de grado 3, mientras que
+Rectangulo solo es exacto para constantes y Trapecio para lineales.
+La pendiente del log-log (ver grafico) confirma empiricamente el orden
+teorico del metodo.
+                    """
+                )
 
 
 # ---------------------------------------------------------------------------
