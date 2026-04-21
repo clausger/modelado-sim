@@ -413,12 +413,14 @@ def _render_modo_funcion(preset: dict, preset_key: str, cfg) -> None:
     if P_latex:
         col_imp, col_info = st.columns([1, 2])
         with col_imp:
-            if st.button("📥 Usar P(x) de Lagrange",
-                          key=f"deriv_usar_P_{preset_key}",
-                          help="Carga el polinomio interpolante construido en la "
-                                "pestana Lagrange. Responde 'derivar la funcion reconstruida'."):
+            def _cargar_P():
+                # Callback: se ejecuta ANTES del rerun, preservando el resto del estado.
                 st.session_state[f"deriv_fx_{preset_key}"] = P_latex
-                st.rerun()
+            st.button("📥 Usar P(x) de Lagrange",
+                        key=f"deriv_usar_P_{preset_key}",
+                        on_click=_cargar_P,
+                        help="Carga el polinomio interpolante construido en la "
+                              "pestana Lagrange. Responde 'derivar la funcion reconstruida'.")
         with col_info:
             rango = (f"[{fmt_decimal(min(nodos_lag))}, {fmt_decimal(max(nodos_lag))}]"
                       if nodos_lag else "—")
