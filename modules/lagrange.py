@@ -169,13 +169,25 @@ def cota_error(f_expr: sp.Expr, x_sym: sp.Symbol,
         for xi in x_pts:
             prod *= x_eval - xi
 
+        # Cota GLOBAL: max del |producto nodal| sobre [x_0, x_n].
+        xs_nodal = np.linspace(min(x_pts), max(x_pts), 1001)
+        prod_nodal = np.ones_like(xs_nodal)
+        for xi in x_pts:
+            prod_nodal *= (xs_nodal - xi)
+        prod_max = float(np.max(np.abs(prod_nodal)))
+        x_peor = float(xs_nodal[int(np.argmax(np.abs(prod_nodal)))])
+
         from math import factorial
         cota_val = M / factorial(n + 1) * abs(prod)
+        cota_global = M / factorial(n + 1) * prod_max
 
         return {
             "n": n, "M": M, "producto": abs(prod),
             "factorial": factorial(n + 1),
             "cota": cota_val,
+            "producto_max": prod_max,
+            "x_peor": x_peor,
+            "cota_global": cota_global,
             "fn1_expr": sp.simplify(fn1),
         }
     except Exception as e:
@@ -475,17 +487,95 @@ def render_lagrange() -> None:
         cota_info = cota_error(f_expr, sp.Symbol("x"), x_pts, x_eval)
         if "error" not in cota_info:
             with st.expander(f"Cota teorica de error (Caceres pg 22) — grado {n}",
-                              expanded=False):
+                              expanded=True):
+                st.markdown("**Teorema del error de Lagrange.** "
+                             "Si $f \\in C^{n+1}[a,b]$, para cada $x \\in [a,b]$ existe "
+                             "$\\xi(x) \\in (a,b)$ tal que:")
+                st.latex(
+                    r"E(x) = f(x) - P(x) = \frac{f^{(n+1)}(\xi)}{(n+1)!} "
+                    r"\prod_{i=0}^{n} (x - x_i)"
+                )
+                st.markdown("Como no conocemos $\\xi$, se **acota** tomando el peor caso:")
                 st.latex(
                     r"|E(x)| \le \frac{M_{n+1}}{(n+1)!} \left| \prod_{i=0}^{n} (x - x_i) \right|"
                 )
+
+                st.markdown("**Definiciones de cada termino:**")
+                st.markdown(
+                    f"- $n = {n}$ **grado** del polinomio (nro de nodos − 1).\n"
+                    f"- $f^{{({n+1})}}(x)$ **derivada de orden n+1** de la funcion original. "
+                    "Mide que tanto se 'curva' f mas alla de lo que P puede capturar.\n"
+                    f"- $M_{{{n+1}}} = \\max_{{x \\in [a,b]}} |f^{{({n+1})}}(x)|$ **maximo absoluto** "
+                    "de esa derivada en el intervalo. Es la 'constante de suavidad': si f es muy "
+                    "oscilante, $M$ grande => cota grande.\n"
+                    f"- $({n+1})! = {cota_info['factorial']}$ **factorial**: atenua el error a medida "
+                    "que agregamos nodos (divisor crece rapido).\n"
+                    f"- $\\prod_{{i=0}}^{{{n}}}(x - x_i)$ **polinomio nodal**: vale 0 en cada nodo "
+                    "(por eso el error es 0 ahi) y crece al alejarse de ellos. Controla la **forma** del error."
+                )
+
+                st.markdown(f"**Para esta f(x):**")
                 st.latex(rf"f^{{({n+1})}}(x) = {sp.latex(cota_info['fn1_expr'])}")
+
+                st.markdown(f"#### Cota **local** en $x = {fmt_decimal(x_eval)}$")
                 col_m, col_f, col_p, col_cota = st.columns(4)
                 col_m.metric(f"M_{n+1} = max|f^({n+1})|", fmt_decimal(cota_info["M"]))
                 col_f.metric(f"({n+1})!", cota_info["factorial"])
                 col_p.metric(f"|Π(x−x_i)| en x={fmt_decimal(x_eval)}",
                               fmt_decimal(cota_info["producto"]))
                 col_cota.metric("Cota |E(x)|", fmt_decimal(cota_info["cota"]))
+
+                st.markdown(f"#### Cota **global** en $[{fmt_decimal(min(x_pts))},\\, {fmt_decimal(max(x_pts))}]$")
+                col_gp, col_gx, col_gc = st.columns(3)
+                col_gp.metric("max |Π(x−x_i)| en el intervalo",
+                               fmt_decimal(cota_info["producto_max"]))
+                col_gx.metric("se alcanza en x ≈",
+                               fmt_decimal(cota_info["x_peor"]))
+                col_gc.metric("Cota global max|E(x)|",
+                               fmt_decimal(cota_info["cota_global"]))
+
+                # Analisis teorico automatico
+                try:
+                    err_real = abs(float(f_np(x_eval)) - y_eval)
+                except Exception:
+                    err_real = None
+
+                st.markdown("#### Analisis teorico")
+                lineas = []
+                lineas.append(
+                    f"**M_{{{n+1}}} = {fmt_decimal(cota_info['M'])}** viene de que "
+                    f"$f^{{({n+1})}}(x)={sp.latex(cota_info['fn1_expr'])}$ alcanza su maximo "
+                    "absoluto en el intervalo. Este es el termino que **domina** la magnitud "
+                    "de la cota: cuanto mas oscilante es f, peor aproxima Lagrange."
+                )
+                lineas.append(
+                    f"El **polinomio nodal** $|\\prod(x-x_i)|$ vale {fmt_decimal(cota_info['producto'])} "
+                    f"en $x={fmt_decimal(x_eval)}$ y llega a un maximo de "
+                    f"{fmt_decimal(cota_info['producto_max'])} cerca de "
+                    f"$x \\approx {fmt_decimal(cota_info['x_peor'])}$. Por eso la cota global "
+                    f"({fmt_decimal(cota_info['cota_global'])}) es mayor que la cota local "
+                    f"({fmt_decimal(cota_info['cota'])})."
+                )
+                if err_real is not None:
+                    ratio = err_real / cota_info['cota'] if cota_info['cota'] > 0 else 0.0
+                    lineas.append(
+                        f"**Error real** en $x={fmt_decimal(x_eval)}$: "
+                        f"$|f(x)-P(x)| = {fmt_decimal(err_real)}$. "
+                        f"La cota local predice $\\le {fmt_decimal(cota_info['cota'])}$ "
+                        f"=> el error real es el **{fmt_decimal(ratio*100)}%** de la cota. "
+                        + ("La cota es **ajustada** (tight) — f casi satura el peor caso."
+                           if ratio > 0.5 else
+                           "La cota es **conservadora** — el error real es bastante menor "
+                           "porque $\\xi$ no cae en el maximo de $f^{{(n+1)}}$.")
+                    )
+                lineas.append(
+                    f"**Para mejorar**: agregar nodos => $(n+1)!$ crece factorialmente, "
+                    "pero ojo con el **fenomeno de Runge** (nodos equiespaciados con $n$ grande "
+                    "hacen que $M_{n+1}$ explote mas rapido que $(n+1)!$ en funciones no analiticas). "
+                    "Alternativa: nodos de **Chebyshev** minimizan $\\max|\\prod(x-x_i)|$."
+                )
+                for linea in lineas:
+                    st.markdown(f"- {linea}")
 
     # Mostrar polinomio
     st.subheader("Polinomio interpolante")
