@@ -412,6 +412,30 @@ def render_lagrange() -> None:
         if f_expr is not None:
             st.latex(rf"f(x) = {sp.latex(f_expr)}")
 
+    # Autocalcular y_i desde f(x_i): evita errores de tipeo manual.
+    # Recordatorio: argumentos de sin/cos siempre en radianes (numpy/sympy).
+    if f_np is not None:
+        autocalc_y = st.checkbox(
+            "Calcular y_i automaticamente desde f(x_i) [radianes]",
+            value=True,
+            key=f"lag_autocalc_{preset_key}",
+            help=("Si esta activado, se ignora la columna y_i de la tabla y se usa "
+                   "y_i = f(x_i). Recorda: funciones trigonometricas trabajan en radianes."),
+        )
+        if autocalc_y:
+            try:
+                y_pts = [float(f_np(xi)) for xi in x_pts]
+                st.caption(
+                    "y_i = f(x_i): "
+                    + ",  ".join(f"f({fmt_decimal(xi)})={fmt_decimal(yi)}"
+                                   for xi, yi in zip(x_pts, y_pts))
+                )
+            except Exception as e:
+                st.warning(
+                    f"No se pudo evaluar f en los nodos: {e}. "
+                    "Se usan los y_i de la tabla."
+                )
+
     # Construir polinomio
     try:
         res = construir_lagrange(x_pts, y_pts)
