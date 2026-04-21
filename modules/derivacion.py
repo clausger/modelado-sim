@@ -308,6 +308,66 @@ def _pasos_formulas(tipo: str = "central") -> list[Paso]:
     return pasos
 
 
+def _pasos_numericos(f_np, fp_np, x: float, h: float) -> list[Paso]:
+    """Pasos con valores reemplazados para un punto x concreto."""
+    pasos: list[Paso] = []
+    f_xm = float(f_np(x - h))
+    f_x = float(f_np(x))
+    f_xp = float(f_np(x + h))
+    fx = fmt_decimal
+    xm, xc, xp = fx(x - h), fx(x), fx(x + h)
+    d_prog = (f_xp - f_x) / h
+    d_regr = (f_x - f_xm) / h
+    d_cent = (f_xp - f_xm) / (2 * h)
+    d2_cent = (f_xp - 2 * f_x + f_xm) / (h * h)
+    d_ex = float(fp_np(x)) if fp_np is not None else None
+
+    pasos.append(Paso(
+        titulo=f"Evaluaciones en x = {fx(x)}, h = {fx(h)}",
+        formula=rf"f({xm}) = {fx(f_xm)} \quad f({xc}) = {fx(f_x)} \quad f({xp}) = {fx(f_xp)}",
+        explicacion_tecnica=(
+            f"Los tres valores que vamos a combinar: vecino izquierdo f(x−h), "
+            f"punto central f(x) y vecino derecho f(x+h)."
+        ),
+    ))
+    pasos.append(Paso(
+        titulo="Progresiva — numerica",
+        formula=rf"f'({xc}) \approx \frac{{f({xp}) - f({xc})}}{{h}} = "
+                rf"\frac{{{fx(f_xp)} - {fx(f_x)}}}{{{fx(h)}}} = {fx(d_prog)}",
+        explicacion_tecnica="Pendiente de la secante hacia el vecino derecho.",
+    ))
+    pasos.append(Paso(
+        titulo="Regresiva — numerica",
+        formula=rf"f'({xc}) \approx \frac{{f({xc}) - f({xm})}}{{h}} = "
+                rf"\frac{{{fx(f_x)} - {fx(f_xm)}}}{{{fx(h)}}} = {fx(d_regr)}",
+        explicacion_tecnica="Pendiente de la secante hacia el vecino izquierdo.",
+    ))
+    pasos.append(Paso(
+        titulo="Central — numerica (O(h²))",
+        formula=rf"f'({xc}) \approx \frac{{f({xp}) - f({xm})}}{{2h}} = "
+                rf"\frac{{{fx(f_xp)} - {fx(f_xm)}}}{{2 \cdot {fx(h)}}} = {fx(d_cent)}",
+        explicacion_tecnica="Pendiente entre los dos vecinos — cancela el termino de error de orden h.",
+    ))
+    pasos.append(Paso(
+        titulo="Segunda derivada central — numerica",
+        formula=rf"f''({xc}) \approx \frac{{f({xp}) - 2 f({xc}) + f({xm})}}{{h^2}} = "
+                rf"\frac{{{fx(f_xp)} - 2 \cdot {fx(f_x)} + {fx(f_xm)}}}{{{fx(h*h)}}} = {fx(d2_cent)}",
+    ))
+    if d_ex is not None:
+        err_c_abs = abs(d_cent - d_ex)
+        err_c_rel = err_c_abs / abs(d_ex) * 100 if abs(d_ex) > 1e-15 else float("nan")
+        pasos.append(Paso(
+            titulo=f"Comparacion contra derivada exacta en x = {xc}",
+            formula=rf"f'({xc})_{{\text{{exacta}}}} = {fx(d_ex)} \quad\Rightarrow\quad "
+                    rf"|\text{{err central}}| = {fx(err_c_abs)} \approx {fx(err_c_rel)}\%",
+            explicacion_tecnica=(
+                "Error relativo = |aprox − exacta| / |exacta| · 100. "
+                "El criterio tipico de examen es err% < 1%."
+            ),
+        ))
+    return pasos
+
+
 # --- Render principal ---
 
 def render_derivacion() -> None:
@@ -424,6 +484,17 @@ def _render_modo_funcion(preset: dict, preset_key: str, cfg) -> None:
 
     with tab_pasos:
         pasos = _pasos_formulas("central") + _pasos_formulas("progresiva") + _pasos_formulas("regresiva")
+        # Pasos numericos por cada punto evaluado (valores reemplazados)
+        try:
+            fp_np_local = sp.lambdify(x_sym, sp.diff(f_expr, x_sym), modules=["numpy"])
+        except Exception:
+            fp_np_local = None
+        for xi in xs:
+            pasos.append(Paso(
+                titulo=f"— Sustitucion numerica en x = {fmt_decimal(xi)} —",
+                explicacion_tecnica="A continuacion, los calculos con los valores concretos.",
+            ))
+            pasos += _pasos_numericos(f_np, fp_np_local, float(xi), h)
         render_pasos(pasos, titulo="")
 
     with tab_viz:
