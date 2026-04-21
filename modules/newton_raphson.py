@@ -196,6 +196,50 @@ def newton_raphson(
 
 # --- Plots ---
 
+def _plot_curva_con_raiz(f_np, res: ResultadoNR, a: float, b: float) -> go.Figure:
+    """Grafico estatico para examen: curva f(x) + eje y=0 + raiz marcada.
+
+    Responde al enunciado "grafique la curva y ubique la raiz calculada".
+    """
+    from utils.graficos import apply_geogebra_style
+
+    xs = np.linspace(a, b, 600)
+    try:
+        ys = f_np(xs)
+    except Exception:
+        ys = np.array([f_np(xi) for xi in xs])
+
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(
+        x=xs, y=ys, mode="lines", name="f(x)",
+        line=dict(color="#1f77b4", width=2.5),
+    ))
+    fig.add_hline(y=0, line=dict(color="#666", dash="dot", width=1))
+
+    if res.raiz is not None:
+        try:
+            f_raiz = float(f_np(res.raiz))
+        except Exception:
+            f_raiz = 0.0
+        fig.add_trace(go.Scatter(
+            x=[res.raiz], y=[f_raiz],
+            mode="markers+text",
+            marker=dict(size=14, color="#d62728", symbol="circle",
+                         line=dict(color="#7a0b0b", width=1.5)),
+            text=[f"Raiz ≈ {fmt_decimal(res.raiz)}"],
+            textposition="top center",
+            textfont=dict(size=13, color="#7a0b0b"),
+            name="Raiz",
+        ))
+
+    fig.update_layout(
+        title=dict(text="Curva f(x) con raiz ubicada", x=0.5),
+        xaxis_title="x", yaxis_title="f(x)",
+        height=460, showlegend=True,
+    )
+    return apply_geogebra_style(fig)
+
+
 def _plot_funcion_tangente(f_np, res: ResultadoNR, iter_focus: int,
                             x_min: float, x_max: float) -> go.Figure:
     margen = (x_max - x_min) * 0.2
@@ -481,7 +525,23 @@ def render_newton_raphson() -> None:
 
     tab_resumen, tab_pasos, tab_viz = st.tabs(["Resumen", "Paso a paso", "Visualizaciones"])
 
+    # Intervalo para el plot estatico: cubre x0, todas las iteraciones y la raiz,
+    # mas un margen del 25%.
+    xs_all = [res.x0] + [it.x_n for it in res.iteraciones] + [it.x_next for it in res.iteraciones]
+    if res.raiz is not None:
+        xs_all.append(res.raiz)
+    a_plot, b_plot = min(xs_all), max(xs_all)
+    if a_plot == b_plot:
+        a_plot, b_plot = a_plot - 1.0, b_plot + 1.0
+    else:
+        span = b_plot - a_plot
+        a_plot -= span * 0.25
+        b_plot += span * 0.25
+
     with tab_resumen:
+        st.markdown("**Grafico para examen** — curva f(x) con la raiz ubicada:")
+        st.plotly_chart(_plot_curva_con_raiz(f_np, res, a_plot, b_plot),
+                         use_container_width=True)
         df = _tabla_dataframe(res)
         resaltar = resaltar_tolerancia("E_abs", criterios.tol_abs) if criterios.usar_abs else None
         render_tabla_iteraciones(df, resaltar=resaltar,

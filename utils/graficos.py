@@ -110,3 +110,25 @@ def plot_comparacion_barras(metodos, resultados, errores) -> go.Figure:
         margin=dict(l=40, r=20, t=30, b=40),
     )
     return fig
+
+
+def apply_geogebra_style(fig: go.Figure) -> go.Figure:
+    """Estilo tipo GeoGebra: fondo claro, grilla suave, ejes visibles cruzando en (0,0)."""
+    fig.update_layout(
+        template="plotly_white",
+        plot_bgcolor="#f7f7f7",
+        paper_bgcolor="#ffffff",
+        font=dict(family="Arial, sans-serif", size=12, color="#222"),
+        margin=dict(l=50, r=20, t=40, b=45),
+    )
+    fig.update_xaxes(
+        showgrid=True, gridcolor="#dddddd", gridwidth=1,
+        zeroline=True, zerolinecolor="#888", zerolinewidth=1.5,
+        showline=True, linecolor="#666", mirror=True,
+    )
+    fig.update_yaxes(
+        showgrid=True, gridcolor="#dddddd", gridwidth=1,
+        zeroline=True, zerolinecolor="#888", zerolinewidth=1.5,
+        showline=True, linecolor="#666", mirror=True,
+    )
+    return fig
