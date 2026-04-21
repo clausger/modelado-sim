@@ -447,7 +447,7 @@ def _render_modo_funcion(preset: dict, preset_key: str, cfg) -> None:
         fp_expr = None
 
     x_grid_default = preset.get("x_grid", [1.0])
-    col_grid, col_h = st.columns(2)
+    col_grid, col_h, col_tol = st.columns(3)
     with col_grid:
         grid_str = st.text_input(
             "Puntos donde derivar (separados por coma)",
@@ -458,6 +458,15 @@ def _render_modo_funcion(preset: dict, preset_key: str, cfg) -> None:
         h = st.number_input("Paso h", value=float(preset.get("h", 0.1)),
                               format="%.6f", min_value=1e-12, step=0.01,
                               key=f"deriv_h_{preset_key}")
+    with col_tol:
+        tol_pct = st.number_input(
+            "Tolerancia error % (central)",
+            value=float(preset.get("tol_pct", 1.0)),
+            min_value=0.0, step=0.1, format="%.3f",
+            key=f"deriv_tol_{preset_key}",
+            help="Criterio de aceptacion: |aprox − exacta| / |exacta| · 100 ≤ tol. "
+                  "El ejercicio 4 de la guia pide <1%.",
+        )
 
     try:
         xs = [float(s.strip()) for s in grid_str.split(",") if s.strip()]
@@ -470,6 +479,13 @@ def _render_modo_funcion(preset: dict, preset_key: str, cfg) -> None:
     tab_resumen, tab_pasos, tab_viz = st.tabs(["Resumen", "Paso a paso", "Visualizaciones"])
 
     with tab_resumen:
+        # Agregar columna de error % relativo si hay derivada exacta
+        if "err cent" in df.columns and "f'(x) exacta" in df.columns:
+            exacta = df["f'(x) exacta"].abs().replace(0, float("nan"))
+            df["err % cent"] = (df["err cent"] / exacta * 100).fillna(0.0)
+            df["cumple tol"] = df["err % cent"].apply(
+                lambda e: "✅" if e <= tol_pct else "⚠"
+            )
         render_tabla_iteraciones(df, titulo="Tabla de derivadas por metodo",
                                   key_export="derivacion_funcion")
         # Comentario analitico
@@ -481,6 +497,20 @@ def _render_modo_funcion(preset: dict, preset_key: str, cfg) -> None:
                 f"progresiva: {fmt_decimal(err_p)}. "
                 f"La central es O(h²), las otras O(h): para h={h} se ve la diferencia."
             )
+            if "err % cent" in df.columns:
+                err_rel_max = float(df["err % cent"].max())
+                cumple_todos = err_rel_max <= tol_pct
+                if cumple_todos:
+                    st.success(
+                        f"✅ **Criterio cumplido**: max error % central = "
+                        f"{fmt_decimal(err_rel_max)}% ≤ tolerancia {fmt_decimal(tol_pct)}%."
+                    )
+                else:
+                    st.warning(
+                        f"⚠ **Criterio NO cumplido**: max error % central = "
+                        f"{fmt_decimal(err_rel_max)}% > tolerancia {fmt_decimal(tol_pct)}%. "
+                        "Probar con un h mas chico."
+                    )
 
     with tab_pasos:
         pasos = _pasos_formulas("central") + _pasos_formulas("progresiva") + _pasos_formulas("regresiva")
