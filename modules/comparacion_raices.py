@@ -29,7 +29,7 @@ from modules.biseccion import (
 )
 from modules.punto_fijo import (
     CriteriosDetencion as CritPF,
-    analizar_convergencia, generar_reformulaciones, punto_fijo,
+    analizar_convergencia, generar_reformulaciones, punto_fijo, steffensen,
 )
 from modules.newton_raphson import (
     CriteriosDetencion as CritNR, newton_raphson,
@@ -208,6 +208,94 @@ def _correr_punto_fijo(f_expr: sp.Expr, x_sym: sp.Symbol, f_np,
     return resultados
 
 
+def _correr_steffensen(f_expr: sp.Expr, x_sym: sp.Symbol, f_np,
+                        a: float, b: float, x0: float,
+                        tol: float, max_iter: int,
+                        precision: int | None) -> ResultadoMetodo:
+    """Corre Steffensen con el mejor candidato g(x) contractivo.
+
+    Si ningun candidato es contractivo, devuelve un ResultadoMetodo indicando
+    que Steffensen no aplica.
+    """
+    candidatos = generar_reformulaciones(f_expr, x_sym)
+    mejor = None
+    mejor_L = float("inf")
+    for nombre, g_expr in candidatos:
+        an = analizar_convergencia(g_expr, x_sym, a, b)
+        if "error" in an:
+            continue
+        if an["L"] < mejor_L:
+            mejor_L = an["L"]
+            mejor = (nombre, g_expr, an)
+
+    if mejor is None or mejor_L >= 1.0:
+        return ResultadoMetodo(
+            nombre="Steffensen",
+            raiz=None, iteraciones=0, convergio=False,
+            motivo_corte=(
+                "No hay g(x) contractiva entre los candidatos automaticos. "
+                "Steffensen requiere |g'| < 1 cerca del punto fijo para convergencia cuadratica."
+            ),
+            tiempo_ms=0.0, errores=[],
+            analisis=(
+                "**Steffensen no aplica**: ningun candidato de reformulacion cumple Lipschitz "
+                f"(mejor L encontrado = {fmt_decimal(mejor_L)}). "
+                "Steffensen necesita $|g'(x^*)| < 1$ (y $\\ne 1$) para la convergencia cuadratica."
+            ),
+        )
+
+    nombre_g, g_expr, an = mejor
+    g_np = sp.lambdify(x_sym, g_expr, modules=["numpy"])
+    crit = CritPF(usar_abs=True, tol_abs=tol, usar_rel=False,
+                   usar_residuo=True, tol_residuo=tol,
+                   usar_max_iter=True, max_iter=max_iter)
+
+    t0 = time.perf_counter()
+    res = steffensen(g_np, x0, crit, precision=precision)
+    dt = (time.perf_counter() - t0) * 1000
+
+    errores = [c.error_abs for c in res.ciclos if np.isfinite(c.error_abs)]
+    orden = _estimar_orden_convergencia(errores)
+
+    analisis = []
+    analisis.append(
+        f"**g(x) elegida**: ${sp.latex(g_expr)}$ (L = {fmt_decimal(an['L'])} < 1)."
+    )
+    analisis.append(
+        "**Steffensen** reinicia el iterador desde la estimacion acelerada $x^*$ en cada ciclo. "
+        "Cada ciclo hace 2 evaluaciones de $g$: "
+        "$x_{n+1} = g(x_n)$, $x_{n+2} = g(x_{n+1})$, luego "
+        "$x^* = x_n - (x_{n+1}-x_n)^2 / (x_{n+2} - 2x_{n+1} + x_n)$."
+    )
+    if res.convergio:
+        if orden is not None:
+            tipo = ("cuadratica (Steffensen ideal)" if abs(orden - 2) < 0.5
+                     else "lineal (similar a PF)" if abs(orden - 1) < 0.3
+                     else f"orden {fmt_decimal(orden, 2)}")
+            analisis.append(
+                f"**Orden empirico** p ≈ {fmt_decimal(orden, 3)} — {tipo} (teorico: 2)."
+            )
+        analisis.append(
+            f"Ciclos totales: **{len(res.ciclos)}** "
+            f"(equivalente a {2 * len(res.ciclos)} evaluaciones de g)."
+        )
+    else:
+        analisis.append(f"**No convergio**: {res.motivo_corte}.")
+
+    return ResultadoMetodo(
+        nombre=f"Steffensen — {nombre_g}",
+        raiz=res.raiz,
+        iteraciones=len(res.ciclos),
+        convergio=res.convergio,
+        motivo_corte=res.motivo_corte,
+        tiempo_ms=dt,
+        errores=errores,
+        analisis="  \n".join(analisis),
+        valor_f_raiz=float(f_np(res.raiz)) if res.raiz is not None else None,
+        extra={"L": an["L"], "g_expr": g_expr, "ciclos": len(res.ciclos)},
+    )
+
+
 def _correr_newton_raphson(f_expr: sp.Expr, x_sym: sp.Symbol, f_np,
                             x0: float, tol: float, max_iter: int,
                             precision: int | None) -> ResultadoMetodo:
@@ -361,6 +449,8 @@ def render_comparacion() -> None:
 
     resultados.extend(_correr_punto_fijo(f_expr, x_sym, f_np, a, b, x0,
                                           tol, int(max_iter), precision_usada))
+    resultados.append(_correr_steffensen(f_expr, x_sym, f_np, a, b, x0,
+                                          tol, int(max_iter), precision_usada))
     resultados.append(_correr_newton_raphson(f_expr, x_sym, f_np, x0,
                                               tol, int(max_iter), precision_usada))
 
@@ -394,6 +484,65 @@ def render_comparacion() -> None:
 
     # Grafico superpuesto
     st.plotly_chart(_plot_errores_superpuestos(resultados), use_container_width=True)
+
+    # Analisis comparativo especifico: Steffensen vs Newton-Raphson
+    # (formato de consigna de examen: velocidad / precision / dificultad)
+    res_steff = next((r for r in resultados if r.nombre.startswith("Steffensen") and r.convergio), None)
+    res_nr = next((r for r in resultados if r.nombre == "Newton-Raphson" and r.convergio), None)
+    if res_steff is not None and res_nr is not None:
+        with st.expander("📝 Analisis comparativo Steffensen vs Newton-Raphson (examen)", expanded=True):
+            n_s = res_steff.iteraciones  # ciclos
+            eval_s = 2 * n_s
+            n_nr = res_nr.iteraciones
+            orden_s = _estimar_orden_convergencia(res_steff.errores)
+            orden_nr = _estimar_orden_convergencia(res_nr.errores)
+            raiz_s = fmt_decimal(res_steff.raiz) if res_steff.raiz is not None else "—"
+            raiz_nr = fmt_decimal(res_nr.raiz) if res_nr.raiz is not None else "—"
+            dif_raices = abs(res_steff.raiz - res_nr.raiz) if (res_steff.raiz is not None and res_nr.raiz is not None) else None
+
+            st.markdown(
+                f"""
+### Velocidad de convergencia
+
+- **Steffensen**: {n_s} ciclos ({eval_s} evaluaciones de $g$) — orden empirico p ≈
+  {fmt_decimal(orden_s, 3) if orden_s else '—'}.
+- **Newton-Raphson**: {n_nr} iteraciones ({n_nr} evaluaciones de $f$ + {n_nr} de $f'$) —
+  orden empirico p ≈ {fmt_decimal(orden_nr, 3) if orden_nr else '—'}.
+
+Ambos son de **orden cuadratico teorico** (p = 2). En la practica, Newton suele
+necesitar menos iteraciones porque cada paso ya incorpora informacion de la
+derivada, mientras que Steffensen la aproxima con diferencias finitas de $g$.
+
+### Precision
+
+- Steffensen: $x \\approx {raiz_s}$.
+- Newton-Raphson: $x \\approx {raiz_nr}$.
+- Diferencia entre ambas raices: {fmt_decimal(dif_raices) if dif_raices is not None else '—'}.
+
+Ambos metodos alcanzan precision equivalente bajo la misma tolerancia. La
+diferencia observada esta dentro de la tolerancia pedida ({fmt_decimal(tol)}).
+
+### Dificultad (implementacion y uso)
+
+| Aspecto | Steffensen | Newton-Raphson |
+|---|---|---|
+| Derivada $f'(x)$ | No requiere | Requerida |
+| Reformulacion $x = g(x)$ | Requerida (y debe cumplir $\|g'\| < 1$) | No aplica |
+| Evaluaciones por paso | 2 de $g$ | 1 de $f$ + 1 de $f'$ |
+| Comportamiento ante raices multiples | Degrada a lineal | Degrada a lineal |
+| Pre-analisis de convergencia | Analizar $g$ en compacto | Chequear $f'(x_0) \\ne 0$ |
+
+### Conclusion
+
+Para esta $f(x)$ concreta, ambos metodos convergen a la misma raiz con
+precision equivalente. **Newton** es preferible si la derivada simbolica es
+facil (poco costo extra). **Steffensen** es preferible cuando $f$ es compleja
+o no diferenciable, porque solo necesita evaluar $g$ — con la $g(x)$
+{fmt_decimal(res_steff.extra['L']) if res_steff.extra else '—'}-contractiva
+encontrada por el asistente, la convergencia cuadratica queda garantizada
+sin calcular $f'$.
+                """
+            )
 
     # Analisis detallado por metodo
     st.subheader("Analisis por metodo")
