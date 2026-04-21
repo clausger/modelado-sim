@@ -388,14 +388,18 @@ def render_derivacion() -> None:
 
     modo_default = preset.get("modo", "funcion")
     modo = st.radio("Modo de entrada",
-                     options=["Desde f(x)", "Desde tabla (cinematica)"],
+                     options=["Desde f(x)",
+                               "Desde tabla (cinematica)",
+                               "Desde nodos de Lagrange (datos discretos)"],
                      index=0 if modo_default == "funcion" else 1,
                      horizontal=True)
 
     if modo == "Desde f(x)":
         _render_modo_funcion(preset, preset_key, cfg)
-    else:
+    elif modo == "Desde tabla (cinematica)":
         _render_modo_tabla(preset, preset_key, cfg)
+    else:
+        _render_modo_nodos_lagrange(preset_key, cfg)
 
     if cfg.mostrar_glosario:
         render_glosario_expander(
@@ -614,6 +618,153 @@ def _render_modo_tabla(preset: dict, preset_key: str, cfg) -> None:
         comentario.append("Aceleracion promedio ≈ 0 (movimiento cuasi-uniforme).")
 
     st.info("  \n".join(comentario))
+
+
+def _render_modo_nodos_lagrange(preset_key: str, cfg) -> None:
+    """Modo 'datos discretos': deriva usando solo los nodos de Lagrange disponibles.
+
+    - Sin h libre: h lo fija el espaciado entre nodos vecinos.
+    - Formula central no-uniforme:  f'(x) ≈ (y_der - y_izq) / (x_der - x_izq).
+    - Comunica explicitamente la limitacion cuando no cumple la tolerancia.
+    """
+    P_sympy_str = st.session_state.get("shared_lagrange_P_sympy")
+    nodos = st.session_state.get("shared_lagrange_nodes", [])
+
+    if not P_sympy_str or not nodos or len(nodos) < 2:
+        st.warning(
+            "⚠ Primero calcula un polinomio en el modulo **Lagrange** "
+            "(con al menos 2 nodos). Al volver aqui, podras derivar usando los "
+            "datos discretos de ese interpolante."
+        )
+        return
+
+    x_sym = sp.Symbol("x")
+    try:
+        P_expr = sp.sympify(P_sympy_str, locals={"x": x_sym})
+        P_np = sp.lambdify(x_sym, P_expr, modules=["numpy"])
+        Pp_expr = sp.simplify(sp.diff(P_expr, x_sym))
+        Pp_np = sp.lambdify(x_sym, Pp_expr, modules=["numpy"])
+    except Exception as e:
+        st.error(f"No se pudo reconstruir P(x) desde la sesion: {e}")
+        return
+
+    nodos_sorted = sorted(float(n) for n in nodos)
+    y_nodos = [float(P_np(n)) for n in nodos_sorted]
+
+    st.markdown("#### Nodos disponibles (de Lagrange)")
+    df_nodos = pd.DataFrame({
+        "x_i": nodos_sorted,
+        "y_i = P(x_i)": y_nodos,
+    })
+    render_tabla_iteraciones(df_nodos, titulo=None, key_export="deriv_nodos_lag")
+    st.latex(rf"P(x) = {sp.latex(P_expr)}")
+    st.caption(f"Derivada simbolica (referencia exacta): $P'(x) = {sp.latex(Pp_expr)}$")
+
+    col_x, col_tol = st.columns(2)
+    with col_x:
+        x_default = float((nodos_sorted[0] + nodos_sorted[-1]) / 2)
+        x_eval = st.number_input(
+            "Derivar en x =",
+            value=x_default, format="%.6f",
+            min_value=float(nodos_sorted[0]),
+            max_value=float(nodos_sorted[-1]),
+            key=f"deriv_lag_x_{preset_key}",
+            help="Debe caer dentro del rango de nodos. Los vecinos mas cercanos "
+                  "(izquierdo y derecho) se eligen automaticamente.",
+        )
+    with col_tol:
+        tol_pct = st.number_input(
+            "Tolerancia error % (central)",
+            value=1.0, min_value=0.0, step=0.1, format="%.3f",
+            key=f"deriv_lag_tol_{preset_key}",
+        )
+
+    # Buscar vecinos: nodo mas cercano a la izquierda y a la derecha de x_eval.
+    izq = [n for n in nodos_sorted if n < x_eval]
+    der = [n for n in nodos_sorted if n > x_eval]
+
+    if not izq or not der:
+        # x_eval coincide con un nodo o esta en un extremo: necesitamos uno a cada lado
+        if x_eval in nodos_sorted:
+            idx = nodos_sorted.index(x_eval)
+            if 0 < idx < len(nodos_sorted) - 1:
+                x_izq = nodos_sorted[idx - 1]
+                x_der = nodos_sorted[idx + 1]
+            else:
+                st.error(
+                    "x coincide con un nodo extremo: no hay vecino a un lado para "
+                    "central. Elegi un x interior o usa el modo 'Desde f(x)' "
+                    "con progresiva/regresiva."
+                )
+                return
+        else:
+            st.error(
+                "x cae fuera del rango interior de nodos: no hay vecino a ambos "
+                "lados. Elegi un x entre el primer y ultimo nodo."
+            )
+            return
+    else:
+        x_izq = max(izq)
+        x_der = min(der)
+
+    y_izq = float(P_np(x_izq))
+    y_der = float(P_np(x_der))
+    h_izq = x_eval - x_izq
+    h_der = x_der - x_eval
+
+    # Formula central no-uniforme: pendiente de la secante entre vecinos.
+    fp_aprox = (y_der - y_izq) / (x_der - x_izq)
+    fp_exacta = float(Pp_np(x_eval))
+    err_abs = abs(fp_aprox - fp_exacta)
+    err_rel = err_abs / abs(fp_exacta) * 100 if abs(fp_exacta) > 1e-15 else float("nan")
+    cumple = err_rel <= tol_pct
+
+    # Aviso fijo (naranja) explicando la limitacion de datos discretos.
+    st.warning(
+        f"**Modo datos discretos**: h esta fijado por los nodos disponibles "
+        f"(h_izq = {fmt_decimal(h_izq)}, h_der = {fmt_decimal(h_der)}). "
+        "Error esperado O(h²). Si el error supera la tolerancia, la unica "
+        "forma de reducirlo es **agregar mas nodos** al interpolante de Lagrange."
+    )
+
+    st.markdown("#### Vecinos usados")
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("x_izq", fmt_decimal(x_izq), f"y = {fmt_decimal(y_izq)}")
+    c2.metric("x_der", fmt_decimal(x_der), f"y = {fmt_decimal(y_der)}")
+    c3.metric("h_izq = x − x_izq", fmt_decimal(h_izq))
+    c4.metric("h_der = x_der − x", fmt_decimal(h_der))
+
+    st.markdown("#### Central no-uniforme")
+    st.latex(
+        r"f'(x) \approx \frac{y_{\text{der}} - y_{\text{izq}}}{x_{\text{der}} - x_{\text{izq}}}"
+    )
+    st.latex(
+        rf"f'({fmt_decimal(x_eval)}) \approx "
+        rf"\frac{{{fmt_decimal(y_der)} - {fmt_decimal(y_izq)}}}"
+        rf"{{{fmt_decimal(x_der)} - {fmt_decimal(x_izq)}}} = {fmt_decimal(fp_aprox)}"
+    )
+
+    st.markdown("#### Comparacion con P'(x) exacta")
+    c1, c2, c3 = st.columns(3)
+    c1.metric("f'(x) aprox", fmt_decimal(fp_aprox))
+    c2.metric("P'(x) exacta", fmt_decimal(fp_exacta))
+    c3.metric("|err abs|", fmt_decimal(err_abs),
+               delta=f"{fmt_decimal(err_rel)}%",
+               delta_color=("normal" if cumple else "inverse"))
+
+    if cumple:
+        st.success(
+            f"✅ **Criterio cumplido**: error relativo {fmt_decimal(err_rel)}% "
+            f"≤ tolerancia {fmt_decimal(tol_pct)}%."
+        )
+    else:
+        st.error(
+            f"❌ **Criterio NO cumplido**: error relativo {fmt_decimal(err_rel)}% "
+            f"> tolerancia {fmt_decimal(tol_pct)}%. "
+            "**Limitacion de datos discretos**: con los nodos actuales no se puede "
+            "reducir h. Agrega mas nodos al interpolante de Lagrange (especialmente "
+            "alrededor del punto de interes) para mejorar la aproximacion."
+        )
 
 
 def render() -> None:
