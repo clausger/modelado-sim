@@ -457,6 +457,11 @@ def render_lagrange() -> None:
         st.error(f"No se pudo construir el polinomio: {e}")
         return
 
+    # Exponer P(x) al modulo de Derivacion (para "tabla de la funcion reconstruida").
+    st.session_state["shared_lagrange_P_latex"] = sp.latex(res.P_expandido)
+    st.session_state["shared_lagrange_P_sympy"] = str(res.P_expandido)
+    st.session_state["shared_lagrange_nodes"] = [float(v) for v in x_pts]
+
     x_eval_default = float(preset.get("x_eval", (x_pts[0] + x_pts[-1]) / 2))
     col_eval, col_info = st.columns([1, 2])
     with col_eval:

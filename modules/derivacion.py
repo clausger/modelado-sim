@@ -346,6 +346,29 @@ def render_derivacion() -> None:
 
 def _render_modo_funcion(preset: dict, preset_key: str, cfg) -> None:
     default_latex = preset.get("latex", r"\sin(x)")
+
+    # Integracion con Lagrange: si ya se construyo P(x), ofrecer importarlo.
+    P_latex = st.session_state.get("shared_lagrange_P_latex")
+    nodos_lag = st.session_state.get("shared_lagrange_nodes", [])
+    if P_latex:
+        col_imp, col_info = st.columns([1, 2])
+        with col_imp:
+            if st.button("📥 Usar P(x) de Lagrange",
+                          key=f"deriv_usar_P_{preset_key}",
+                          help="Carga el polinomio interpolante construido en la "
+                                "pestana Lagrange. Responde 'derivar la funcion reconstruida'."):
+                st.session_state[f"deriv_fx_{preset_key}"] = P_latex
+                st.rerun()
+        with col_info:
+            rango = (f"[{fmt_decimal(min(nodos_lag))}, {fmt_decimal(max(nodos_lag))}]"
+                      if nodos_lag else "—")
+            st.caption(
+                f"P(x) disponible de Lagrange (nodos en {rango}). "
+                "Al derivar P(x) estas aplicando diferencias finitas sobre la "
+                "**funcion reconstruida** (no sobre f original). Ojo: los puntos de "
+                "derivacion ± h deberian caer dentro del rango de interpolacion."
+            )
+
     latex = math_input("f(x) =", default_latex=default_latex,
                         key=f"deriv_fx_{preset_key}")
     x_sym = sp.Symbol("x")
