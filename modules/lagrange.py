@@ -181,6 +181,50 @@ def cota_error(f_expr: sp.Expr, x_sym: sp.Symbol,
         cota_val = M / factorial(n + 1) * abs(prod)
         cota_global = M / factorial(n + 1) * prod_max
 
+        # Maximizacion SIMBOLICA del polinomio nodal g(x) = ∏(x - x_i):
+        # derivar, igualar a 0, evaluar |g| en raices criticas y extremos.
+        a_v, b_v = float(min(x_pts)), float(max(x_pts))
+        simbolico: dict = {}
+        try:
+            g = sp.Integer(1)
+            for xi in x_pts:
+                # Intenta reconocer multiplos de pi para que g(x) salga
+                # legible (ej: pi/2 en lugar de 471238898/300000000).
+                try:
+                    xi_sym = sp.nsimplify(xi, [sp.pi], rational=False, tolerance=1e-9)
+                except Exception:
+                    xi_sym = sp.nsimplify(xi)
+                g *= (x_sym - xi_sym)
+            g_expand = sp.expand(g)
+            gp = sp.expand(sp.diff(g_expand, x_sym))
+            raices = sp.solve(gp, x_sym)
+            criticos = []
+            for r in raices:
+                try:
+                    rv = complex(r.evalf())
+                    if abs(rv.imag) < 1e-9 and a_v - 1e-12 <= rv.real <= b_v + 1e-12:
+                        criticos.append(float(rv.real))
+                except Exception:
+                    pass
+            candidatos_x = sorted(set(criticos + [a_v, b_v]))
+            g_np = sp.lambdify(x_sym, g_expand, modules=["numpy"])
+            candidatos = [(c, abs(float(g_np(c)))) for c in candidatos_x]
+            idx_max = max(range(len(candidatos)), key=lambda i: candidatos[i][1])
+            prod_max_sim = candidatos[idx_max][1]
+            x_peor_sim = candidatos[idx_max][0]
+            cota_global_sim = M / factorial(n + 1) * prod_max_sim
+            simbolico = {
+                "g_expand": g_expand,
+                "gp_expand": gp,
+                "raices_criticas": [float(c) for c in criticos],
+                "candidatos": candidatos,
+                "prod_max": prod_max_sim,
+                "x_peor": x_peor_sim,
+                "cota_global": cota_global_sim,
+            }
+        except Exception as e:
+            simbolico = {"error": str(e)}
+
         return {
             "n": n, "M": M, "producto": abs(prod),
             "factorial": factorial(n + 1),
@@ -189,6 +233,7 @@ def cota_error(f_expr: sp.Expr, x_sym: sp.Symbol,
             "x_peor": x_peor,
             "cota_global": cota_global,
             "fn1_expr": sp.simplify(fn1),
+            "simbolico": simbolico,
         }
     except Exception as e:
         return {"error": str(e)}
@@ -650,6 +695,135 @@ $$|E(x)| \\le \\frac{{M_{{{n+1}}}}}{{({n+1})!}} \\left|\\prod_{{i=0}}^{{{n}}}(x 
 """
                     st.markdown(texto)
                     st.code(texto, language="markdown")
+
+                # Bloque "formato alumno": estructura completa de respuesta de examen
+                with st.expander(
+                    "📝 Estructura de respuesta para examen (formato alumno)",
+                    expanded=False,
+                ):
+                    sim = cota_info.get("simbolico", {})
+                    f_latex_txt = sp.latex(f_expr) if f_expr is not None else "f(x)"
+                    a_v, b_v = float(min(x_pts)), float(max(x_pts))
+                    nodos_txt = ", ".join(
+                        f"$x_{i}={fmt_decimal(xi)}$" for i, xi in enumerate(x_pts)
+                    )
+
+                    # Tabla
+                    bloque = []
+                    bloque.append(f"**Datos.** $f(x) = {f_latex_txt}$, "
+                                   f"se interpola en {nodos_txt}.")
+                    bloque.append("")
+                    bloque.append("| x | " + " | ".join(fmt_decimal(xi) for xi in x_pts) + " |")
+                    bloque.append("|---|" + "---|" * len(x_pts))
+                    bloque.append("| f(x) | " + " | ".join(fmt_decimal(yi) for yi in y_pts) + " |")
+                    bloque.append("")
+
+                    # Polinomio: formula general + sustitucion + cancelacion
+                    bloque.append(f"**Polinomio interpolante** (Lagrange):")
+                    bloque.append(rf"$$P_{n}(x) = \sum_{{i=0}}^{{{n}}} y_i\, L_i(x)$$")
+                    expr_sum = " + ".join(
+                        rf"{fmt_decimal(yi)}\, L_{i}(x)" for i, yi in enumerate(y_pts)
+                    )
+                    bloque.append(rf"$$P_{n}(x) = {expr_sum}$$")
+                    cero_idx = [i for i, yi in enumerate(y_pts) if abs(yi) < 1e-12]
+                    no_cero_idx = [i for i, yi in enumerate(y_pts) if abs(yi) >= 1e-12]
+                    if cero_idx:
+                        bloque.append(
+                            f"Como $y_i = 0$ para "
+                            f"$i \\in \\{{{', '.join(str(i) for i in cero_idx)}\\}}$, "
+                            "esos terminos se anulan. Sobreviven:"
+                        )
+                    for i in no_cero_idx:
+                        bloque.append(rf"$$L_{i}(x) = {sp.latex(res.bases[i])}$$")
+                    bloque.append("**Polinomio resultante:**")
+                    bloque.append(rf"$$P(x) = {sp.latex(res.P_expandido)}$$")
+                    bloque.append("")
+
+                    # Error local
+                    try:
+                        f_eval_v = float(f_np(x_eval))
+                        err_loc = abs(f_eval_v - y_eval)
+                    except Exception:
+                        f_eval_v = err_loc = None
+
+                    bloque.append(f"**Error local en $\\xi = {fmt_decimal(x_eval)}$.**")
+                    bloque.append(rf"$$P({fmt_decimal(x_eval)}) = {fmt_decimal(y_eval)}$$")
+                    if f_eval_v is not None:
+                        bloque.append(
+                            rf"$$|E(\xi)| = |f(\xi) - P(\xi)| "
+                            rf"= |{fmt_decimal(f_eval_v)} - {fmt_decimal(y_eval)}| "
+                            rf"= {fmt_decimal(err_loc)}$$"
+                        )
+                    bloque.append("")
+
+                    # Cota global
+                    bloque.append("**Cota de error global.**")
+                    bloque.append("Derivadas sucesivas:")
+                    romanos = ["I", "II", "III", "IV", "V", "VI", "VII", "VIII"]
+                    for k in range(1, n + 2):
+                        try:
+                            dk = sp.simplify(sp.diff(f_expr, x_sym_f, k))
+                            sym = romanos[k - 1] if k - 1 < len(romanos) else f"({k})"
+                            bloque.append(rf"- $f^{{({sym})}}(x) = {sp.latex(dk)}$")
+                        except Exception:
+                            pass
+                    sym_n1 = romanos[n] if n < len(romanos) else f"({n+1})"
+                    bloque.append(
+                        rf"$M_{{{n+1}}} = \max_{{x \in [{fmt_decimal(a_v)}, {fmt_decimal(b_v)}]}} "
+                        rf"|f^{{({sym_n1})}}(x)| = {fmt_decimal(cota_info['M'])}$"
+                    )
+                    bloque.append(
+                        rf"$$|E(x)| \le \frac{{M_{{{n+1}}}}}{{({n+1})!}} \cdot "
+                        rf"\max\,|\textstyle\prod_{{i=0}}^{{{n}}} (x - x_i)|$$"
+                    )
+                    bloque.append("")
+
+                    # Maximizacion simbolica del polinomio nodal
+                    bloque.append("**Maximización del polinomio nodal** "
+                                   r"$g(x) = \prod_{i=0}^{n}(x - x_i)$:")
+                    if "g_expand" in sim:
+                        bloque.append(rf"$$g(x) = {sp.latex(sim['g_expand'])}$$")
+                        bloque.append(rf"$$g'(x) = {sp.latex(sim['gp_expand'])}$$")
+                        if sim.get("raices_criticas"):
+                            raices_txt = ", ".join(
+                                f"$x \\approx {fmt_decimal(r)}$"
+                                for r in sim["raices_criticas"]
+                            )
+                            bloque.append(f"$g'(x) = 0 \\Rightarrow$ {raices_txt}.")
+                        bloque.append("Evaluando $|g|$ en candidatos "
+                                       "(puntos críticos y extremos del intervalo):")
+                        for c, gc in sim["candidatos"]:
+                            bloque.append(f"- $|g({fmt_decimal(c)})| = {fmt_decimal(gc)}$")
+                        bloque.append(
+                            rf"$\max_{{[{fmt_decimal(a_v)}, {fmt_decimal(b_v)}]}} |g(x)| "
+                            rf"= {fmt_decimal(sim['prod_max'])}$ en $x \approx "
+                            rf"{fmt_decimal(sim['x_peor'])}$."
+                        )
+                        bloque.append("**Cota global numérica:**")
+                        bloque.append(
+                            rf"$$|E(x)| \le \frac{{{fmt_decimal(cota_info['M'])}}}"
+                            rf"{{{cota_info['factorial']}}} \cdot "
+                            rf"{fmt_decimal(sim['prod_max'])} = "
+                            rf"{fmt_decimal(sim['cota_global'])}$$"
+                        )
+                        # Verificacion error_local <= cota_global
+                        if err_loc is not None:
+                            ok = err_loc <= sim["cota_global"]
+                            bloque.append("")
+                            bloque.append(
+                                f"**Verificación para $\\xi = {fmt_decimal(x_eval)}$:**  "
+                                f"${fmt_decimal(err_loc)} \\le {fmt_decimal(sim['cota_global'])}$ "
+                                + ("✓" if ok else "✗")
+                            )
+                    else:
+                        bloque.append(
+                            "_(no se pudo maximizar simbólicamente; "
+                            f"ver cota numérica = {fmt_decimal(cota_info['cota_global'])})_"
+                        )
+
+                    texto2 = "\n".join(bloque)
+                    st.markdown(texto2)
+                    st.code(texto2, language="markdown")
 
     # Mostrar polinomio
     st.subheader("Polinomio interpolante")
