@@ -197,32 +197,60 @@ def newton_raphson(
 # --- Plots ---
 
 def _plot_curva_con_raiz(f_np, res: ResultadoNR, a: float, b: float) -> go.Figure:
-    """Grafico estatico para examen: curva f(x) + eje y=0 + raiz marcada.
+    """Grafico estatico para examen: curva f(x) + ejes x e y visibles + raiz marcada.
 
-    Responde al enunciado "grafique la curva y ubique la raiz calculada".
+    Garantiza que el eje y (x=0) y el eje x (y=0) se vean en la figura,
+    extendiendo el rango si es necesario, para responder "grafique la curva
+    y ubique la raiz calculada".
     """
     from utils.graficos import apply_geogebra_style
 
-    xs = np.linspace(a, b, 600)
+    # Extender rango en x para que incluya x=0 (eje y visible)
+    x_lo = min(a, 0.0)
+    x_hi = max(b, 0.0)
+    if x_lo == x_hi:
+        x_lo, x_hi = x_lo - 1.0, x_hi + 1.0
+
+    xs = np.linspace(x_lo, x_hi, 700)
     try:
-        ys = f_np(xs)
+        ys = np.asarray(f_np(xs), dtype=float)
     except Exception:
-        ys = np.array([f_np(xi) for xi in xs])
+        ys = np.array([float(f_np(xi)) for xi in xs])
+
+    # Rango en y que incluya y=0 y la curva, con margen
+    y_finite = ys[np.isfinite(ys)]
+    if len(y_finite) == 0:
+        y_lo, y_hi = -1.0, 1.0
+    else:
+        y_min, y_max = float(np.min(y_finite)), float(np.max(y_finite))
+        y_lo = min(y_min, 0.0)
+        y_hi = max(y_max, 0.0)
+        span = y_hi - y_lo if y_hi > y_lo else 1.0
+        y_lo -= span * 0.1
+        y_hi += span * 0.1
 
     fig = go.Figure()
     fig.add_trace(go.Scatter(
         x=xs, y=ys, mode="lines", name="f(x)",
         line=dict(color="#1f77b4", width=2.5),
     ))
-    fig.add_hline(y=0, line=dict(color="#666", dash="dot", width=1))
+    # Ejes x e y remarcados (cruzan en 0,0)
+    fig.add_hline(y=0, line=dict(color="#222", width=1.5))
+    fig.add_vline(x=0, line=dict(color="#222", width=1.5))
 
     if res.raiz is not None:
         try:
             f_raiz = float(f_np(res.raiz))
         except Exception:
             f_raiz = 0.0
+        # Linea vertical punteada hasta la raiz
         fig.add_trace(go.Scatter(
-            x=[res.raiz], y=[f_raiz],
+            x=[res.raiz, res.raiz], y=[0, f_raiz],
+            mode="lines", line=dict(color="#d62728", dash="dot", width=1),
+            showlegend=False, hoverinfo="skip",
+        ))
+        fig.add_trace(go.Scatter(
+            x=[res.raiz], y=[0],
             mode="markers+text",
             marker=dict(size=14, color="#d62728", symbol="circle",
                          line=dict(color="#7a0b0b", width=1.5)),
@@ -235,7 +263,9 @@ def _plot_curva_con_raiz(f_np, res: ResultadoNR, a: float, b: float) -> go.Figur
     fig.update_layout(
         title=dict(text="Curva f(x) con raiz ubicada", x=0.5),
         xaxis_title="x", yaxis_title="f(x)",
-        height=460, showlegend=True,
+        height=480, showlegend=True,
+        xaxis=dict(range=[x_lo, x_hi]),
+        yaxis=dict(range=[y_lo, y_hi]),
     )
     return apply_geogebra_style(fig)
 
