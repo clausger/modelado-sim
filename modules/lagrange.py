@@ -577,6 +577,75 @@ def render_lagrange() -> None:
                 for linea in lineas:
                     st.markdown(f"- {linea}")
 
+                # Bloque unificado listo para copiar al examen
+                with st.expander("📝 Texto listo para copiar al examen", expanded=False):
+                    fn1_latex = sp.latex(cota_info['fn1_expr'])
+                    try:
+                        f_latex_txt = sp.latex(f_expr)
+                    except Exception:
+                        f_latex_txt = "f(x)"
+                    a_val, b_val = min(x_pts), max(x_pts)
+                    M_val = cota_info["M"]
+                    fact_val = cota_info["factorial"]
+                    prod_loc = cota_info["producto"]
+                    cota_loc = cota_info["cota"]
+                    prod_max = cota_info["producto_max"]
+                    x_peor = cota_info["x_peor"]
+                    cota_glob = cota_info["cota_global"]
+
+                    txt_err_real = ""
+                    if err_real is not None:
+                        ratio = err_real / cota_loc if cota_loc > 0 else 0.0
+                        ajuste = ("ajustada (tight) — f casi satura el peor caso"
+                                   if ratio > 0.5 else
+                                   "conservadora — el error real es menor porque "
+                                   "ξ no cae en el máximo de f^(n+1)")
+                        txt_err_real = (
+                            f"\n\n**Error real en x = {fmt_decimal(x_eval)}:**  \n"
+                            f"|f(x) − P(x)| = |{fmt_decimal(float(f_np(x_eval)))} − "
+                            f"{fmt_decimal(y_eval)}| = {fmt_decimal(err_real)}  \n"
+                            f"La cota local predice ≤ {fmt_decimal(cota_loc)}, "
+                            f"el error real es el {fmt_decimal(ratio*100)}% de la cota "
+                            f"→ cota {ajuste}."
+                        )
+
+                    texto = f"""
+**Análisis del error de interpolación de Lagrange** (grado n = {n})
+
+**Fórmula del error** (Cáceres pg 22):
+$$E(x) = f(x) - P(x) = \\frac{{f^{{({n+1})}}(\\xi)}}{{({n+1})!}} \\prod_{{i=0}}^{{{n}}}(x - x_i), \\quad \\xi \\in (a,b)$$
+
+**Cota (peor caso):**
+$$|E(x)| \\le \\frac{{M_{{{n+1}}}}}{{({n+1})!}} \\left|\\prod_{{i=0}}^{{{n}}}(x - x_i)\\right|$$
+
+**Datos de esta corrida:**
+- Función: $f(x) = {f_latex_txt}$ en $[{fmt_decimal(a_val)},\\, {fmt_decimal(b_val)}]$
+- Nodos: {", ".join(fmt_decimal(xi) for xi in x_pts)}
+- Derivada (n+1): $f^{{({n+1})}}(x) = {fn1_latex}$
+- $M_{{{n+1}}} = \\max_{{[a,b]}}|f^{{({n+1})}}(x)| = {fmt_decimal(M_val)}$
+- $({n+1})! = {fact_val}$
+
+**Error local en x = {fmt_decimal(x_eval)}:**
+- $|\\prod(x - x_i)| = {fmt_decimal(prod_loc)}$
+- Cota local: $|E({fmt_decimal(x_eval)})| \\le \\dfrac{{{fmt_decimal(M_val)}}}{{{fact_val}}} \\cdot {fmt_decimal(prod_loc)} = {fmt_decimal(cota_loc)}$
+
+**Error global (peor caso en todo el intervalo):**
+- $\\max_{{[a,b]}}|\\prod(x - x_i)| = {fmt_decimal(prod_max)}$ (se alcanza en $x \\approx {fmt_decimal(x_peor)}$)
+- Cota global: $\\max|E(x)| \\le \\dfrac{{{fmt_decimal(M_val)}}}{{{fact_val}}} \\cdot {fmt_decimal(prod_max)} = {fmt_decimal(cota_glob)}${txt_err_real}
+
+**Interpretación:**
+- $M_{{{n+1}}}$ mide la **curvatura** de f que P no captura; cuanto mayor, peor aproxima Lagrange.
+- El **polinomio nodal** $\\prod(x - x_i)$ se anula en cada nodo (error exactamente 0 allí) y crece al alejarse. Por eso la cota global ({fmt_decimal(cota_glob)}) es mayor que la local ({fmt_decimal(cota_loc)}).
+- El error máximo potencial cae en $x \\approx {fmt_decimal(x_peor)}$, el punto más alejado de todos los nodos simultáneamente.
+
+**Cómo mejorar:**
+- Agregar nodos → $(n+1)!$ crece factorialmente en el denominador.
+- Cuidado con el **fenómeno de Runge**: con nodos equiespaciados y $n$ grande, $M_{{n+1}}$ puede crecer más rápido que $(n+1)!$ (f no analítica).
+- Alternativa óptima: **nodos de Chebyshev**, que minimizan $\\max|\\prod(x-x_i)|$ concentrando más nodos en los bordes.
+"""
+                    st.markdown(texto)
+                    st.code(texto, language="markdown")
+
     # Mostrar polinomio
     st.subheader("Polinomio interpolante")
     st.latex(rf"P(x) = {sp.latex(res.P_expandido)}")
