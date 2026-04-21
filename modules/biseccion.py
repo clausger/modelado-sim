@@ -382,6 +382,156 @@ def _construir_pasos(res: ResultadoBiseccion, n_pasos: int = 3) -> list[Paso]:
 
 # --- Renderizado principal ---
 
+def _plot_bolzano(f_np, a: float, b: float, raiz: float | None) -> go.Figure:
+    """Visual didactico del teorema de Bolzano: continuidad + cambio de signo => raiz."""
+    from utils.graficos import apply_geogebra_style
+
+    margen = (b - a) * 0.15 if b > a else 1.0
+    xs = np.linspace(a - margen, b + margen, 600)
+    try:
+        ys = f_np(xs)
+    except Exception:
+        ys = np.array([f_np(xi) for xi in xs])
+
+    fa = float(f_np(a))
+    fb = float(f_np(b))
+
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(x=xs, y=ys, mode="lines", name="f(x)",
+                              line=dict(color="#1f77b4", width=2.5)))
+    fig.add_hline(y=0, line=dict(color="#444", dash="dot", width=1))
+    # Sombrear el intervalo [a,b]
+    fig.add_vrect(x0=a, x1=b, fillcolor="#ffe08a", opacity=0.25,
+                   line_width=0, annotation_text="[a, b]",
+                   annotation_position="top left")
+    # Marcar f(a) y f(b)
+    fig.add_trace(go.Scatter(
+        x=[a, b], y=[fa, fb], mode="markers+text",
+        marker=dict(size=12, color=["#d62728", "#2ca02c"]),
+        text=[f"f(a)={fmt_decimal(fa)}", f"f(b)={fmt_decimal(fb)}"],
+        textposition=["bottom center" if fa < 0 else "top center",
+                       "bottom center" if fb < 0 else "top center"],
+        name="Extremos",
+    ))
+    # Lineas verticales a,b
+    fig.add_vline(x=a, line=dict(color="#d62728", dash="dash", width=1))
+    fig.add_vline(x=b, line=dict(color="#2ca02c", dash="dash", width=1))
+    if raiz is not None:
+        fig.add_trace(go.Scatter(
+            x=[raiz], y=[0], mode="markers+text",
+            marker=dict(size=14, color="#7a0b0b", symbol="star"),
+            text=[f"c ≈ {fmt_decimal(raiz)}"], textposition="top center",
+            name="Raiz garantizada",
+        ))
+    fig.update_layout(
+        title=dict(text="Bolzano: f continua en [a,b] y f(a)·f(b) < 0 ⇒ ∃ c ∈ (a,b) : f(c) = 0", x=0.5),
+        xaxis_title="x", yaxis_title="f(x)", height=480,
+    )
+    return apply_geogebra_style(fig)
+
+
+def _render_tab_bolzano(f_np, f_expr, a: float, b: float,
+                         fa: float, fb: float, res: ResultadoBiseccion) -> None:
+    """Tab dedicada al teorema de Bolzano: enunciado, demostracion y visual."""
+    st.markdown("### Teorema de Bolzano (o del Valor Intermedio — caso f(c)=0)")
+
+    st.markdown("**Enunciado.**")
+    st.latex(
+        r"\text{Si } f:[a,b]\to\mathbb{R} \text{ es continua en } [a,b] "
+        r"\text{ y } f(a)\cdot f(b) < 0, "
+        r"\text{ entonces } \exists\, c \in (a,b) \text{ tal que } f(c) = 0."
+    )
+
+    st.markdown("**Hipotesis (lo que hay que verificar).**")
+    st.markdown(
+        "1. **Continuidad** de $f$ en el intervalo cerrado $[a, b]$.\n"
+        "2. **Cambio de signo**: $f(a) \\cdot f(b) < 0$ (signos opuestos en los extremos)."
+    )
+
+    st.markdown("**Tesis.**")
+    st.markdown("Existe al menos un $c \\in (a, b)$ con $f(c) = 0$ (o sea, al menos una raiz).")
+
+    st.markdown("---")
+    st.markdown("### Demostracion (lista para escribir en el examen)")
+    st.markdown(
+        "Sea $f$ continua en $[a, b]$ con $f(a) \\cdot f(b) < 0$. "
+        "Sin perdida de generalidad supongamos $f(a) < 0 < f(b)$."
+    )
+    st.markdown("**Paso 1 — Definir el conjunto.**")
+    st.latex(r"S = \{\, x \in [a,b] \;:\; f(x) < 0 \,\}")
+    st.markdown(
+        "$S$ es **no vacio** porque $a \\in S$ (ya que $f(a) < 0$) y esta **acotado superiormente** por $b$."
+    )
+    st.markdown("**Paso 2 — Tomar el supremo.**")
+    st.markdown("Por el **axioma del supremo** en $\\mathbb{R}$, existe")
+    st.latex(r"c = \sup S, \qquad c \in [a, b].")
+    st.markdown("**Paso 3 — Probar que $f(c) = 0$** (por el absurdo, descartando $f(c)<0$ y $f(c)>0$).")
+    st.markdown(
+        "- **Caso $f(c) < 0$**: como $f$ es continua en $c$, existe $\\delta > 0$ tal que "
+        "$f(x) < 0$ para todo $x \\in (c - \\delta, c + \\delta)$. Entonces "
+        "$c + \\delta/2 \\in S$, contradiciendo que $c = \\sup S$."
+    )
+    st.markdown(
+        "- **Caso $f(c) > 0$**: analogamente, por continuidad existe $\\delta > 0$ con "
+        "$f(x) > 0$ en $(c - \\delta, c + \\delta)$. Entonces $c - \\delta/2$ es cota superior "
+        "de $S$ menor que $c$, contradiciendo la minimalidad del supremo."
+    )
+    st.markdown("**Paso 4 — Conclusion.**")
+    st.markdown(
+        "Como $f(c)$ no puede ser $<0$ ni $>0$, necesariamente $f(c) = 0$. "
+        "Ademas $c \\neq a$ (porque $f(a)<0$) y $c \\neq b$ (porque $f(b)>0$), "
+        "luego $c \\in (a, b)$. $\\blacksquare$"
+    )
+
+    st.markdown("---")
+    st.markdown("### Verificacion numerica en este ejercicio")
+
+    col1, col2, col3 = st.columns(3)
+    col1.metric("f(a)", fmt_decimal(fa),
+                 delta="negativo" if fa < 0 else "positivo")
+    col2.metric("f(b)", fmt_decimal(fb),
+                 delta="positivo" if fb > 0 else "negativo")
+    col3.metric("f(a)·f(b)", fmt_decimal(fa * fb),
+                 delta="< 0 ✓ Bolzano aplica" if fa * fb < 0 else "≥ 0 ✗",
+                 delta_color="normal" if fa * fb < 0 else "inverse")
+
+    try:
+        f_latex = sp.latex(f_expr)
+    except Exception:
+        f_latex = "f(x)"
+    st.latex(rf"f(x) = {f_latex} \text{{ es continua en }} [{fmt_decimal(a)},\, {fmt_decimal(b)}]")
+    st.latex(
+        rf"f({fmt_decimal(a)}) = {fmt_decimal(fa)}, \qquad "
+        rf"f({fmt_decimal(b)}) = {fmt_decimal(fb)}"
+    )
+    st.latex(
+        rf"f({fmt_decimal(a)}) \cdot f({fmt_decimal(b)}) "
+        rf"= {fmt_decimal(fa*fb)} < 0"
+    )
+    st.markdown(
+        f"Por el **Teorema de Bolzano**, existe "
+        f"$c \\in ({fmt_decimal(a)}, {fmt_decimal(b)})$ con $f(c) = 0$. "
+        + (f"El metodo de Biseccion aproximo $c \\approx {fmt_decimal(res.raiz)}$."
+           if res.raiz is not None else "")
+    )
+
+    st.markdown("### Visualizacion")
+    st.plotly_chart(_plot_bolzano(f_np, a, b, res.raiz), use_container_width=True)
+
+    with st.expander("Observaciones y contraejemplos"):
+        st.markdown(
+            "- **Unicidad no garantizada**: Bolzano asegura *al menos una* raiz, no una unica. "
+            "Si $f$ tiene varios cambios de signo en $[a,b]$, puede haber mas de una.\n"
+            "- **La continuidad es esencial**: para $f(x) = 1/x$ en $[-1, 1]$ se cumple "
+            "$f(-1)\\cdot f(1) = -1 < 0$, pero no hay raiz porque $f$ no es continua en $x=0$.\n"
+            "- **Reciproco falso**: puede haber raiz sin cambio de signo. Ejemplo: "
+            "$f(x)=x^2$ en $[-1,1]$ tiene raiz en $0$ pero $f(-1)\\cdot f(1) = 1 > 0$.\n"
+            "- **Relacion con Biseccion**: Bolzano es la *justificacion teorica* del metodo. "
+            "En cada iteracion, al elegir el subintervalo con cambio de signo se preserva "
+            "la hipotesis y se garantiza que la raiz sigue adentro."
+        )
+
+
 def render_biseccion() -> None:
     st.header("Metodo de Biseccion")
     st.caption("Busqueda binaria de raices — prof. Omar J. Caceres, pg 8–10")
@@ -519,7 +669,9 @@ def render_biseccion() -> None:
     col_cota.metric("Cota teorica final", fmt_decimal(res.iteraciones[-1].cota_teorica))
 
     # --- Tabs principales ---
-    tab_resumen, tab_pasos, tab_viz = st.tabs(["Resumen", "Paso a paso", "Visualizaciones"])
+    tab_resumen, tab_pasos, tab_viz, tab_bolzano = st.tabs(
+        ["Resumen", "Paso a paso", "Visualizaciones", "Teorema de Bolzano"]
+    )
 
     with tab_resumen:
         df = _tabla_dataframe(res)
@@ -548,6 +700,9 @@ def render_biseccion() -> None:
             st.plotly_chart(_plot_convergencia(res), use_container_width=True)
         with col_g2:
             st.plotly_chart(_plot_error(res), use_container_width=True)
+
+    with tab_bolzano:
+        _render_tab_bolzano(f_np, expr, a, b, fa, fb, res)
 
     # Glosario al final si esta activo
     if cfg.mostrar_glosario:
