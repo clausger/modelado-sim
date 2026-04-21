@@ -26,7 +26,7 @@ def test_cuenta_siempre_2_por_ciclo():
     crit = CriteriosDetencion(
         usar_abs=True, tol_abs=1e-6,
         usar_rel=False, tol_rel=0.0,
-        usar_residuo=False, tol_residuo=0.0,
+        usar_residuo=False, tol_residuo=1e-9,
         usar_max_iter=True, max_iter=50,
     )
     res = steffensen(g_np, x0=1.0, criterios=crit)
@@ -47,7 +47,7 @@ def test_cambia_con_tolerancia():
         crit = CriteriosDetencion(
             usar_abs=True, tol_abs=tol,
             usar_rel=False, tol_rel=0.0,
-            usar_residuo=False, tol_residuo=0.0,
+            usar_residuo=False, tol_residuo=1e-9,
             usar_max_iter=True, max_iter=50,
         )
         res = steffensen(g_np, x0=1.0, criterios=crit)
@@ -75,7 +75,7 @@ def test_ejemplo_bug_report_3_ciclos_6_evaluaciones():
     crit = CriteriosDetencion(
         usar_abs=True, tol_abs=1e-8,
         usar_rel=False, tol_rel=0.0,
-        usar_residuo=False, tol_residuo=0.0,
+        usar_residuo=False, tol_residuo=1e-9,
         usar_max_iter=True, max_iter=50,
     )
     res = steffensen(g_np, x0=1.0, criterios=crit)
@@ -83,6 +83,27 @@ def test_ejemplo_bug_report_3_ciclos_6_evaluaciones():
     evals = g_evaluaciones_steffensen(res)
     assert evals == 2 * n, (
         f"Steffensen con {n} ciclos deberia reportar {2 * n} evals, reporto {evals}"
+    )
+
+
+def test_residuo_activo_cuenta_evaluacion_extra():
+    """Cuando el residuo esta activo, cada ciclo agrega 1 eval extra para
+    el chequeo |g(x*) - x*|. El conteo debe reflejarlo (no es 2*ciclos).
+    """
+    x = sp.Symbol("x")
+    g_np = _g_cubica(x)
+    crit = CriteriosDetencion(
+        usar_abs=True, tol_abs=1e-9,
+        usar_rel=False, tol_rel=0.0,
+        usar_residuo=True, tol_residuo=1e-9,
+        usar_max_iter=True, max_iter=50,
+    )
+    res = steffensen(g_np, x0=1.0, criterios=crit)
+    n = len(res.ciclos)
+    evals = g_evaluaciones_steffensen(res)
+    # Con residuo on, cada ciclo hace 2 evals principales + 1 de check = 3
+    assert evals == 3 * n, (
+        f"Con residuo activo: {n} ciclos deberian dar {3*n} evals, dio {evals}"
     )
 
 
@@ -96,7 +117,7 @@ def test_sin_cache_entre_corridas():
     crit_flojo = CriteriosDetencion(
         usar_abs=True, tol_abs=1e-2,
         usar_rel=False, tol_rel=0.0,
-        usar_residuo=False, tol_residuo=0.0,
+        usar_residuo=False, tol_residuo=1e-9,
         usar_max_iter=True, max_iter=50,
     )
     res_flojo = steffensen(g_np, x0=1.0, criterios=crit_flojo)
@@ -105,7 +126,7 @@ def test_sin_cache_entre_corridas():
     crit_estricto = CriteriosDetencion(
         usar_abs=True, tol_abs=1e-12,
         usar_rel=False, tol_rel=0.0,
-        usar_residuo=False, tol_residuo=0.0,
+        usar_residuo=False, tol_residuo=1e-9,
         usar_max_iter=True, max_iter=50,
     )
     res_estricto = steffensen(g_np, x0=1.0, criterios=crit_estricto)

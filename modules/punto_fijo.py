@@ -611,6 +611,7 @@ class ResultadoSteffensen:
     motivo_corte: str = ""
     convergio: bool = False
     x0: float = 0.0
+    g_evals: int = 0  # conteo exacto de evaluaciones de g durante la corrida
 
 
 def steffensen(
@@ -640,7 +641,9 @@ def steffensen(
     for ciclo in range(1, n_max + 1):
         try:
             x_n1 = r(float(g_np(x_n)))
+            res.g_evals += 1
             x_n2 = r(float(g_np(x_n1)))
+            res.g_evals += 1
         except Exception as e:
             res.motivo_corte = f"Error al evaluar g en ciclo {ciclo}: {e}"
             return res
@@ -682,6 +685,7 @@ def steffensen(
         if criterios.usar_residuo:
             try:
                 residuo = abs(float(g_np(x_star)) - x_star)
+                res.g_evals += 1
                 if residuo <= criterios.tol_residuo:
                     res.raiz = x_star
                     res.motivo_corte = f"|g(x*) − x*| ≤ {fmt_decimal(criterios.tol_residuo)} (residuo)"
@@ -703,15 +707,19 @@ def steffensen(
 
 
 def g_evaluaciones_steffensen(res: ResultadoSteffensen) -> int:
-    """Cuenta evaluaciones de g en una corrida de Steffensen.
+    """Cuenta exacta de evaluaciones de g en una corrida de Steffensen.
 
-    Convencion de catedra: cada ciclo evalua g exactamente 2 veces
-    (x_{n+1} = g(x_n) y x_{n+2} = g(x_{n+1})). Siempre se cuenta sobre
-    los ciclos realmente ejecutados (res.ciclos), nunca sobre valores
-    cacheados. Centralizado para garantizar consistencia entre resumen,
-    tabla y accordion de examen.
+    Cada ciclo hace 2 evaluaciones principales (x_{n+1} = g(x_n) y
+    x_{n+2} = g(x_{n+1})). Ademas, si el criterio de residuo esta activo,
+    cada ciclo agrega 1 evaluacion extra para el chequeo |g(x*) - x*|.
+
+    El conteo se hace DENTRO del algoritmo (res.g_evals) — es la unica
+    fuente confiable porque refleja exactamente cuantas veces se llamo
+    a g_np, incluyendo los checks de residuo.
+
+    Fallback a 2*ciclos si el campo no existe (compatibilidad).
     """
-    return 2 * len(res.ciclos)
+    return getattr(res, "g_evals", 0) or 2 * len(res.ciclos)
 
 
 def _tabla_steffensen(res: ResultadoSteffensen) -> pd.DataFrame:

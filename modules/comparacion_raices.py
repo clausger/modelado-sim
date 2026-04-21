@@ -497,13 +497,11 @@ def render_comparacion() -> None:
     if res_steff is not None and res_nr is not None:
         with st.expander("📝 Analisis comparativo Steffensen vs Newton-Raphson (examen)", expanded=True):
             n_s = res_steff.iteraciones  # ciclos realmente ejecutados
-            # SIEMPRE recalculado desde la corrida actual — nunca cacheado.
-            # Fuente unica de verdad: comparacion_raices usa el helper centralizado
-            # via extra['g_evals'], garantizando consistencia con punto_fijo.py.
+            # SIEMPRE recalculado desde la corrida actual. El conteo real viene
+            # de res_steff.extra['g_evals'], calculado dentro del algoritmo —
+            # NO es 2*ciclos cuando el residuo esta activo (cada ciclo con check
+            # de residuo agrega 1 evaluacion extra de g).
             eval_s = res_steff.extra.get("g_evals", 2 * n_s) if res_steff.extra else 2 * n_s
-            assert eval_s == 2 * n_s, (
-                f"Inconsistencia: ciclos={n_s}, evals={eval_s} (deberian ser 2*ciclos)"
-            )
             n_nr = res_nr.iteraciones
             orden_s = _estimar_orden_convergencia(res_steff.errores)
             orden_nr = _estimar_orden_convergencia(res_nr.errores)
