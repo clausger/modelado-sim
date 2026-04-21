@@ -425,6 +425,8 @@ def render_lagrange() -> None:
         if autocalc_y:
             try:
                 y_pts = [float(f_np(xi)) for xi in x_pts]
+                # Snap a cero el ruido de punto flotante (ej: sin(pi) = 1.22e-16).
+                y_pts = [0.0 if abs(y) < 1e-12 else y for y in y_pts]
                 st.caption(
                     "y_i = f(x_i): "
                     + ",  ".join(f"f({fmt_decimal(xi)})={fmt_decimal(yi)}"
