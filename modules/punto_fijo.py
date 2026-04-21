@@ -104,8 +104,17 @@ class ResultadoPuntoFijo:
 
 # --- Asistente de reformulacion ---
 
-def generar_reformulaciones(f_expr: sp.Expr, x: sp.Symbol) -> list[tuple[str, sp.Expr]]:
+def generar_reformulaciones(
+    f_expr: sp.Expr, x: sp.Symbol
+) -> list[tuple[str, sp.Expr, dict]]:
     """Genera g(x) candidatos para x = g(x) a partir de f(x)=0.
+
+    Retorna una lista de (nombre, g_expr, meta) donde meta contiene:
+      - estrategia: clave corta (picard_pos, picard_neg, newton, despeje)
+      - titulo: titulo amigable
+      - idea: explicacion coloquial de por que esta construccion tiene sentido
+      - pasos_latex: lista de strings LaTeX con los pasos algebraicos
+      - termino_despejado: (solo despeje) str LaTeX del termino del que se despejo x
 
     Estrategias:
       1. g(x) = x + f(x)  (Picard positivo)
@@ -114,10 +123,10 @@ def generar_reformulaciones(f_expr: sp.Expr, x: sp.Symbol) -> list[tuple[str, sp
       4. Despeje por termino: para cada termino t(x) que contenga x, intenta
          aislar t = -resto y despejar x. Util para f con x^n: x = (-resto)^(1/n).
     """
-    candidatos: list[tuple[str, sp.Expr]] = []
+    candidatos: list[tuple[str, sp.Expr, dict]] = []
     vistos: set[str] = set()
 
-    def _agregar(nombre: str, expr: sp.Expr) -> None:
+    def _agregar(nombre: str, expr: sp.Expr, meta: dict) -> None:
         try:
             simp = sp.simplify(expr)
         except Exception:
@@ -126,22 +135,77 @@ def generar_reformulaciones(f_expr: sp.Expr, x: sp.Symbol) -> list[tuple[str, sp
         if key in vistos:
             return
         vistos.add(key)
-        candidatos.append((nombre, simp))
+        candidatos.append((nombre, simp, meta))
+
+    f_latex = sp.latex(f_expr)
 
     # Picard +/-
     try:
-        _agregar(r"g_1(x) = x + f(x)", x + f_expr)
+        _agregar(
+            r"g_1(x) = x + f(x)", x + f_expr,
+            {
+                "estrategia": "picard_pos",
+                "titulo": "Picard positivo: sumar x a ambos lados",
+                "idea": (
+                    "La ecuacion f(x)=0 es equivalente a x = x + f(x). "
+                    "Es la reformulacion mas directa: convertimos f(x)=0 en un "
+                    "problema de punto fijo sumando x en ambos lados."
+                ),
+                "pasos_latex": [
+                    rf"f(x) = 0",
+                    rf"x + f(x) = x + 0",
+                    rf"x = x + f(x) \;=\; g_1(x)",
+                    rf"g_1(x) = x + \left({f_latex}\right)",
+                ],
+            },
+        )
     except Exception:
         pass
     try:
-        _agregar(r"g_2(x) = x - f(x)", x - f_expr)
+        _agregar(
+            r"g_2(x) = x - f(x)", x - f_expr,
+            {
+                "estrategia": "picard_neg",
+                "titulo": "Picard negativo: restar f(x) a x",
+                "idea": (
+                    "Misma idea que Picard positivo pero con signo opuesto. "
+                    "A veces una version converge y la otra no, asi que conviene "
+                    "probar ambas."
+                ),
+                "pasos_latex": [
+                    rf"f(x) = 0",
+                    rf"x - f(x) = x - 0",
+                    rf"x = x - f(x) \;=\; g_2(x)",
+                    rf"g_2(x) = x - \left({f_latex}\right)",
+                ],
+            },
+        )
     except Exception:
         pass
 
     # Tipo Newton
     try:
         df = sp.diff(f_expr, x)
-        _agregar(r"g_3(x) = x - f(x)/f'(x) \; (\text{tipo Newton})", x - f_expr / df)
+        df_latex = sp.latex(sp.simplify(df))
+        _agregar(
+            r"g_3(x) = x - f(x)/f'(x) \; (\text{tipo Newton})",
+            x - f_expr / df,
+            {
+                "estrategia": "newton",
+                "titulo": "Tipo Newton: dividir por la derivada",
+                "idea": (
+                    "Si ponemos g(x) = x - f(x)/f'(x) estamos reproduciendo el "
+                    "metodo de Newton-Raphson como punto fijo. Tiene convergencia "
+                    "cuadratica cerca de la raiz, pero requiere que f'(x) no se anule."
+                ),
+                "pasos_latex": [
+                    rf"f(x) = 0 \iff \frac{{f(x)}}{{f'(x)}} = 0 \quad (\text{{si }} f'\neq 0)",
+                    rf"x - \frac{{f(x)}}{{f'(x)}} = x",
+                    rf"g_3(x) = x - \frac{{f(x)}}{{f'(x)}} "
+                    rf"= x - \frac{{{f_latex}}}{{{df_latex}}}",
+                ],
+            },
+        )
     except Exception:
         pass
 
@@ -152,33 +216,74 @@ def generar_reformulaciones(f_expr: sp.Expr, x: sp.Symbol) -> list[tuple[str, sp
         for idx, t in enumerate(terminos):
             if not t.has(x):
                 continue
-            # Buscamos el exponente de x en el termino: coef * x^n (n entero positivo)
             coef, poly_part = t.as_coeff_Mul()
             exponent = None
-            base_sym = None
             if poly_part == x:
                 exponent = 1
-                base_sym = x
             elif isinstance(poly_part, sp.Pow) and poly_part.base == x \
                     and poly_part.exp.is_number and poly_part.exp.is_positive:
                 try:
                     exponent = int(poly_part.exp)
-                    base_sym = x
                 except (TypeError, ValueError):
                     continue
             if exponent is None or exponent < 1:
                 continue
-            # resto = f_expr - t, entonces t = -resto => x^exponent = -resto/coef
             resto = sp.simplify(f_exp - t)
             rhs = sp.simplify(-resto / coef)
-            # g(x) = rhs^(1/exponent) — si exponent=1, g(x) = rhs directo
-            if exponent == 1:
-                nombre = rf"g_{{desp{idx}}}(x) = -({sp.latex(resto)})/({sp.latex(coef)})"
-                _agregar(nombre, rhs)
+            termino_latex = sp.latex(t)
+            resto_latex = sp.latex(resto)
+            coef_latex = sp.latex(coef)
+            rhs_latex = sp.latex(rhs)
+
+            pasos = [
+                rf"f(x) = 0 \quad\Rightarrow\quad {f_latex} = 0",
+                rf"\text{{Aislamos el termino }} {termino_latex}:\quad "
+                rf"{termino_latex} = -\left({resto_latex}\right)",
+            ]
+            if coef != 1:
+                pasos.append(
+                    rf"x^{{{exponent}}} = \frac{{-\left({resto_latex}\right)}}{{{coef_latex}}} = {rhs_latex}"
+                )
             else:
-                nombre = rf"g_{{desp{idx}}}(x) = \sqrt[{exponent}]{{{sp.latex(rhs)}}}"
+                pasos.append(rf"x^{{{exponent}}} = {rhs_latex}")
+
+            if exponent == 1:
+                nombre = rf"g_{{desp{idx}}}(x) = -({resto_latex})/({coef_latex})"
+                pasos.append(rf"x = {rhs_latex} \;=\; g_{{desp{idx}}}(x)")
+                idea = (
+                    f"Aislamos el termino lineal ${termino_latex}$ en f(x)=0 y despejamos x. "
+                    "Es un despeje algebraico directo."
+                )
+                meta = {
+                    "estrategia": "despeje",
+                    "titulo": f"Despeje del termino {sp.latex(t)}",
+                    "idea": idea,
+                    "pasos_latex": pasos,
+                    "termino_despejado": termino_latex,
+                    "exponente": exponent,
+                }
+                _agregar(nombre, rhs, meta)
+            else:
+                nombre = rf"g_{{desp{idx}}}(x) = \sqrt[{exponent}]{{{rhs_latex}}}"
+                pasos.append(
+                    rf"x = \sqrt[{exponent}]{{{rhs_latex}}} \;=\; g_{{desp{idx}}}(x)"
+                )
+                idea = (
+                    f"Aislamos el termino dominante ${termino_latex}$ en f(x)=0, "
+                    f"despejamos $x^{{{exponent}}}$ y tomamos raiz {exponent}-esima. "
+                    "Esta estrategia suele dar g(x) contractiva porque la raiz "
+                    f"{exponent}-esima 'achata' la funcion (su derivada queda chica)."
+                )
                 g_desp = rhs ** sp.Rational(1, exponent)
-                _agregar(nombre, g_desp)
+                meta = {
+                    "estrategia": "despeje",
+                    "titulo": f"Despeje del termino {sp.latex(t)}",
+                    "idea": idea,
+                    "pasos_latex": pasos,
+                    "termino_despejado": termino_latex,
+                    "exponente": exponent,
+                }
+                _agregar(nombre, g_desp, meta)
     except Exception:
         pass
 
@@ -689,11 +794,11 @@ def render_punto_fijo() -> None:
         )
 
         candidatos = generar_reformulaciones(f_expr, x_sym)
-        analisis_cands = [(nombre, g_e, analizar_convergencia(g_e, x_sym, a, b))
-                           for nombre, g_e in candidatos]
+        analisis_cands = [(nombre, g_e, meta, analizar_convergencia(g_e, x_sym, a, b))
+                           for nombre, g_e, meta in candidatos]
 
         filas = []
-        for nombre, g_e, an in analisis_cands:
+        for nombre, g_e, _meta, an in analisis_cands:
             if "error" in an:
                 filas.append({
                     "candidato": nombre, "g(x)": str(g_e),
@@ -713,9 +818,59 @@ def render_punto_fijo() -> None:
                 })
         st.dataframe(pd.DataFrame(filas), use_container_width=True, hide_index=True)
 
-        opciones = [f"{nombre}" for nombre, _, _ in analisis_cands] + ["Escribir g(x) a mano"]
+        # Accordion "Como se construyo esta g(x)?" por candidato
+        st.markdown(
+            "**¿Por que probamos varias g(x)?** "
+            "Todas son equivalentes a f(x)=0 algebraicamente, pero el metodo de punto "
+            "fijo solo converge si $|g'(x)| < 1$ en $[a,b]$ (contraccion de Banach). "
+            "Construimos varios candidatos para que al menos uno cumpla esa cota."
+        )
+        with st.expander("Justificacion de cada candidato (para copiar al examen)",
+                          expanded=False):
+            for i, (nombre, g_e, meta, an) in enumerate(analisis_cands):
+                st.markdown(f"**Candidato {i+1} — {meta.get('titulo', nombre)}**")
+                st.markdown(f"_{meta.get('idea', '')}_")
+                st.markdown("**Pasos algebraicos:**")
+                for paso in meta.get("pasos_latex", []):
+                    st.latex(paso)
+                st.markdown("**g(x) resultante:**")
+                st.latex(rf"g(x) = {sp.latex(g_e)}")
+                if "error" in an:
+                    st.error(
+                        f"✗ No se puede usar: {an['error']} "
+                        "(la derivada o la funcion explota en el intervalo, "
+                        "por eso este candidato queda descartado)."
+                    )
+                else:
+                    gp_latex = sp.latex(an.get("gp_expr", sp.diff(g_e, x_sym)))
+                    st.markdown("**Derivada y constante de Lipschitz:**")
+                    st.latex(rf"g'(x) = {gp_latex}")
+                    st.latex(
+                        rf"L = \max_{{x \in [{fmt_decimal(a)},\, {fmt_decimal(b)}]}} "
+                        rf"|g'(x)| = {fmt_decimal(an['L'])}"
+                    )
+                    if an["contractiva"]:
+                        st.success(
+                            f"✓ L = {fmt_decimal(an['L'])} < 1: **es contractiva**. "
+                            "El Teorema de Banach garantiza convergencia unica desde "
+                            "cualquier x₀ ∈ [a, b]."
+                        )
+                    else:
+                        st.warning(
+                            f"✗ L = {fmt_decimal(an['L'])} ≥ 1: **no es contractiva** en este intervalo. "
+                            "La iteracion tiende a alejarse de la raiz (o diverge). "
+                            "Aunque la formula sea correcta, el metodo no converge."
+                        )
+                    if not an.get("g_de_X_en_X", True):
+                        st.info(
+                            f"Ademas g([a,b]) = [{fmt_decimal(an['g_min'])}, "
+                            f"{fmt_decimal(an['g_max'])}] se sale de [a, b]: hay que achicar el intervalo."
+                        )
+                st.markdown("---")
+
+        opciones = [f"{nombre}" for nombre, _, _, _ in analisis_cands] + ["Escribir g(x) a mano"]
         idx_default = 0
-        for i, (_, _, an) in enumerate(analisis_cands):
+        for i, (_, _, _, an) in enumerate(analisis_cands):
             if "error" not in an and an.get("contractiva"):
                 idx_default = i
                 break
@@ -731,7 +886,7 @@ def render_punto_fijo() -> None:
                 return
         else:
             idx_sel = opciones.index(seleccion)
-            _, g_expr, _ = analisis_cands[idx_sel]
+            _, g_expr, _, _ = analisis_cands[idx_sel]
 
     else:
         default_g = preset.get("latex_g", r"\cos(x)") if preset else r"\cos(x)"

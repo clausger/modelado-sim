@@ -132,7 +132,7 @@ def _correr_punto_fijo(f_expr: sp.Expr, x_sym: sp.Symbol, f_np,
                    usar_residuo=True, tol_residuo=tol,
                    usar_max_iter=True, max_iter=max_iter)
 
-    for nombre, g_expr in candidatos:
+    for nombre, g_expr, _meta in candidatos:
         an = analizar_convergencia(g_expr, x_sym, a, b)
         if "error" in an:
             resultados.append(ResultadoMetodo(
@@ -220,7 +220,7 @@ def _correr_steffensen(f_expr: sp.Expr, x_sym: sp.Symbol, f_np,
     candidatos = generar_reformulaciones(f_expr, x_sym)
     mejor = None
     mejor_L = float("inf")
-    for nombre, g_expr in candidatos:
+    for nombre, g_expr, _meta in candidatos:
         an = analizar_convergencia(g_expr, x_sym, a, b)
         if "error" in an:
             continue
