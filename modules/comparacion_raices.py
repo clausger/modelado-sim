@@ -29,8 +29,8 @@ from modules.biseccion import (
 )
 from modules.punto_fijo import (
     CriteriosDetencion as CritPF,
-    analizar_convergencia, g_evaluaciones_steffensen, generar_reformulaciones,
-    punto_fijo, steffensen,
+    aitken_acelerar, analizar_convergencia, g_evaluaciones_steffensen,
+    generar_reformulaciones, punto_fijo, steffensen,
 )
 from modules.newton_raphson import (
     CriteriosDetencion as CritNR, newton_raphson,
@@ -301,6 +301,90 @@ def _correr_steffensen(f_expr: sp.Expr, x_sym: sp.Symbol, f_np,
     )
 
 
+def _correr_aitken(f_expr: sp.Expr, x_sym: sp.Symbol, f_np,
+                    a: float, b: float, x0: float,
+                    tol: float, max_iter: int,
+                    precision: int | None) -> ResultadoMetodo:
+    """Corre Punto Fijo + post-proceso Aitken con el mejor g(x) contractivo.
+
+    Aitken no reinicia (se aplica al final sobre la secuencia de PF): el "costo"
+    es el mismo que PF puro mas la aceleracion simbolica O(n) sin evals extra.
+    """
+    candidatos = generar_reformulaciones(f_expr, x_sym)
+    mejor = None
+    mejor_L = float("inf")
+    for nombre, g_expr, _meta in candidatos:
+        an = analizar_convergencia(g_expr, x_sym, a, b)
+        if "error" in an:
+            continue
+        if an["L"] < mejor_L:
+            mejor_L = an["L"]
+            mejor = (nombre, g_expr, an)
+
+    if mejor is None or mejor_L >= 1.0:
+        return ResultadoMetodo(
+            nombre="Aitken (PF + Δ² post)",
+            raiz=None, iteraciones=0, convergio=False,
+            motivo_corte="No hay g(x) contractiva para PF; Aitken no aplica.",
+            tiempo_ms=0.0, errores=[],
+            analisis="**Aitken no aplica**: ningun candidato cumple Lipschitz.",
+        )
+
+    nombre_g, g_expr, an = mejor
+    g_np = sp.lambdify(x_sym, g_expr, modules=["numpy"])
+    L = an["L"]
+    crit = CritPF(usar_abs=True, tol_abs=tol, usar_rel=False,
+                   usar_residuo=True, tol_residuo=tol,
+                   usar_max_iter=True, max_iter=max_iter)
+
+    t0 = time.perf_counter()
+    res = punto_fijo(g_np, x0, crit, a, b, L_estimado=L, precision=precision)
+    secuencia = [x0] + [it.x_n1 for it in res.iteraciones]
+    acel = aitken_acelerar(secuencia)
+    dt = (time.perf_counter() - t0) * 1000
+
+    # Raiz Aitken = ultimo valor acelerado no-None
+    raiz_ait = next((v for v in reversed(acel) if v is not None), None)
+    convergio = raiz_ait is not None and np.isfinite(raiz_ait)
+
+    # Errores de la sucesion acelerada (|x*_{k+1} - x*_k|)
+    validos = [v for v in acel if v is not None and np.isfinite(v)]
+    errores = [abs(validos[k + 1] - validos[k]) for k in range(len(validos) - 1)]
+
+    analisis = [
+        f"**g(x) elegida**: ${sp.latex(g_expr)}$ (L = {fmt_decimal(L)} < 1).",
+        "**Aitken (Δ² de Aitken)** es un **post-proceso**: se corre PF normal y "
+        "al final se aplica $x^*_n = x_n - (x_{n+1}-x_n)^2 / (x_{n+2} - 2x_{n+1} + x_n)$ "
+        "a ventanas de 3 terminos consecutivos. **No agrega evaluaciones de g** — reutiliza "
+        "las de PF.",
+    ]
+    if convergio:
+        analisis.append(
+            f"PF ejecuto {len(res.iteraciones)} iteraciones; Aitken produjo {len(validos)} "
+            f"terminos acelerados. Raiz acelerada: $x^* \\approx {fmt_decimal(raiz_ait)}$."
+        )
+    else:
+        analisis.append(f"**No convergio**: {res.motivo_corte}.")
+
+    return ResultadoMetodo(
+        nombre=f"Aitken — {nombre_g}",
+        raiz=raiz_ait,
+        iteraciones=len(res.iteraciones),  # reutiliza evals de PF
+        convergio=convergio,
+        motivo_corte=res.motivo_corte if convergio else (res.motivo_corte or "Aitken no pudo acelerar"),
+        tiempo_ms=dt,
+        errores=errores,
+        analisis="  \n".join(analisis),
+        valor_f_raiz=float(f_np(raiz_ait)) if raiz_ait is not None else None,
+        extra={
+            "L": L, "g_expr": g_expr,
+            "pf_iters": len(res.iteraciones),
+            "aitken_terms": len(validos),
+            "g_evals": len(res.iteraciones),  # misma cuenta que PF puro
+        },
+    )
+
+
 def _correr_newton_raphson(f_expr: sp.Expr, x_sym: sp.Symbol, f_np,
                             x0: float, tol: float, max_iter: int,
                             precision: int | None) -> ResultadoMetodo:
@@ -441,6 +525,11 @@ def render_comparacion() -> None:
                     delta="Bolzano OK" if fa * fb < 0 else "Bolzano no garantiza raiz",
                     delta_color="normal" if fa * fb < 0 else "inverse")
 
+    with st.expander("📐 Teorema de Bolzano (justificacion de existencia de raiz)",
+                      expanded=False):
+        from utils.ui.bolzano import render_bolzano
+        render_bolzano(f_np, f_expr, a, b, raiz=None, mostrar_demostracion=True)
+
     if not st.button("Ejecutar comparacion", type="primary"):
         return
 
@@ -454,6 +543,8 @@ def render_comparacion() -> None:
 
     resultados.extend(_correr_punto_fijo(f_expr, x_sym, f_np, a, b, x0,
                                           tol, int(max_iter), precision_usada))
+    resultados.append(_correr_aitken(f_expr, x_sym, f_np, a, b, x0,
+                                      tol, int(max_iter), precision_usada))
     resultados.append(_correr_steffensen(f_expr, x_sym, f_np, a, b, x0,
                                           tol, int(max_iter), precision_usada))
     resultados.append(_correr_newton_raphson(f_expr, x_sym, f_np, x0,
@@ -490,12 +581,13 @@ def render_comparacion() -> None:
     # Grafico superpuesto
     st.plotly_chart(_plot_errores_superpuestos(resultados), use_container_width=True)
 
-    # Analisis comparativo especifico: Steffensen vs Newton-Raphson
+    # Analisis comparativo 3-vias: Aitken / Steffensen / Newton-Raphson
     # (formato de consigna de examen: velocidad / precision / dificultad)
+    res_ait = next((r for r in resultados if r.nombre.startswith("Aitken") and r.convergio), None)
     res_steff = next((r for r in resultados if r.nombre.startswith("Steffensen") and r.convergio), None)
     res_nr = next((r for r in resultados if r.nombre == "Newton-Raphson" and r.convergio), None)
     if res_steff is not None and res_nr is not None:
-        with st.expander("📝 Analisis comparativo Steffensen vs Newton-Raphson (examen)", expanded=True):
+        with st.expander("📝 Analisis comparativo Aitken / Steffensen / Newton-Raphson (examen)", expanded=True):
             n_s = res_steff.iteraciones  # ciclos realmente ejecutados
             # SIEMPRE recalculado desde la corrida actual. El conteo real viene
             # de res_steff.extra['g_evals'], calculado dentro del algoritmo —
@@ -522,47 +614,82 @@ def render_comparacion() -> None:
 
             raiz_s = fmt_decimal(res_steff.raiz) if res_steff.raiz is not None else "—"
             raiz_nr = fmt_decimal(res_nr.raiz) if res_nr.raiz is not None else "—"
-            dif_raices = abs(res_steff.raiz - res_nr.raiz) if (res_steff.raiz is not None and res_nr.raiz is not None) else None
+            dif_s_nr = abs(res_steff.raiz - res_nr.raiz) if (res_steff.raiz is not None and res_nr.raiz is not None) else None
+
+            # Datos Aitken (si aplica)
+            if res_ait is not None:
+                n_pf_a = res_ait.extra.get("pf_iters", res_ait.iteraciones) if res_ait.extra else res_ait.iteraciones
+                n_ait_terms = res_ait.extra.get("aitken_terms", 0) if res_ait.extra else 0
+                eval_a = res_ait.extra.get("g_evals", n_pf_a) if res_ait.extra else n_pf_a
+                orden_a = _estimar_orden_convergencia(res_ait.errores)
+                orden_a_str = _fmt_orden(orden_a, len(res_ait.errores), teorico="1→2 (acelerado)")
+                raiz_a = fmt_decimal(res_ait.raiz)
+                dif_a_nr = abs(res_ait.raiz - res_nr.raiz) if res_ait.raiz is not None else None
+                linea_ait_vel = (f"- **Aitken (Δ² post-proceso)**: {n_pf_a} iters de PF + {n_ait_terms} terminos "
+                                  f"acelerados ({eval_a} evaluaciones de $g$, **sin evals extra**) — "
+                                  f"orden empirico p ≈ {orden_a_str}.")
+                linea_ait_prec = f"- Aitken: $x \\approx {raiz_a}$ (diferencia con Newton: {fmt_decimal(dif_a_nr) if dif_a_nr is not None else '—'})."
+                col_ait_header = "| Aitken |"
+                col_ait_deriv = "| No requiere |"
+                col_ait_refor = "| Requerida, con $\\|g'\\| < 1$ |"
+                col_ait_evals = "| 1 de $g$ por iter PF + post-proceso O(n) sin evals |"
+                col_ait_multi = "| Degrada a lineal |"
+                col_ait_pre = "| Analizar $g$ + correr PF completo antes de acelerar |"
+            else:
+                linea_ait_vel = "- **Aitken**: no aplico (sin g(x) contractiva disponible)."
+                linea_ait_prec = ""
+                col_ait_header = "| Aitken |"
+                col_ait_deriv = "| No requiere |"
+                col_ait_refor = "| Requerida |"
+                col_ait_evals = "| — |"
+                col_ait_multi = "| — |"
+                col_ait_pre = "| — |"
 
             st.markdown(
                 f"""
 ### Velocidad de convergencia
 
+{linea_ait_vel}
 - **Steffensen**: {n_s} ciclos ({eval_s} evaluaciones de $g$, {evals_por_ciclo_s_str}/ciclo) — orden empirico p ≈ {orden_s_str}.
 - **Newton-Raphson**: {n_nr} iteraciones ({n_nr} evaluaciones de $f$ + {n_nr} de $f'$) — orden empirico p ≈ {orden_nr_str}.
 
-Ambos son de **orden cuadratico teorico** (p = 2). En la practica, Newton suele
-necesitar menos iteraciones porque cada paso ya incorpora informacion de la
-derivada, mientras que Steffensen la aproxima con diferencias finitas de $g$.
+**Orden teorico**: Aitken conserva el orden de PF (lineal) pero reduce la
+constante asintotica; Steffensen y Newton son cuadraticos (p ≈ 2). En trabajo
+total, Aitken es el mas barato porque reutiliza las evaluaciones de PF; Newton
+y Steffensen cuestan aprox. lo mismo por paso.
 
 ### Precision
 
-- Steffensen: $x \\approx {raiz_s}$.
+{linea_ait_prec}
+- Steffensen: $x \\approx {raiz_s}$ (diferencia con Newton: {fmt_decimal(dif_s_nr) if dif_s_nr is not None else '—'}).
 - Newton-Raphson: $x \\approx {raiz_nr}$.
-- Diferencia entre ambas raices: {fmt_decimal(dif_raices) if dif_raices is not None else '—'}.
 
-Ambos metodos alcanzan precision equivalente bajo la misma tolerancia. La
-diferencia observada esta dentro de la tolerancia pedida ({fmt_decimal(tol)}).
+Los tres metodos convergen a la misma raiz dentro de la tolerancia pedida ({fmt_decimal(tol)}).
 
 ### Dificultad (implementacion y uso)
 
-| Aspecto | Steffensen | Newton-Raphson |
-|---|---|---|
-| Derivada $f'(x)$ | No requiere | Requerida |
-| Reformulacion $x = g(x)$ | Requerida (y debe cumplir $\|g'\| < 1$) | No aplica |
-| Evaluaciones por paso | {evals_por_ciclo_s_str} de $g$ (2 base + 1 extra si se chequea residuo) | 1 de $f$ + 1 de $f'$ |
-| Comportamiento ante raices multiples | Degrada a lineal | Degrada a lineal |
-| Pre-analisis de convergencia | Analizar $g$ en compacto | Chequear $f'(x_0) \\ne 0$ |
+| Aspecto {col_ait_header} Steffensen | Newton-Raphson |
+|---|---|---|---|
+| Derivada $f'(x)$ {col_ait_deriv} No requiere | Requerida |
+| Reformulacion $x = g(x)$ {col_ait_refor} Requerida, con $\\|g'\\| < 1$ | No aplica |
+| Evaluaciones por paso {col_ait_evals} {evals_por_ciclo_s_str} de $g$ (2 base + 1 si residuo) | 1 de $f$ + 1 de $f'$ |
+| Raices multiples {col_ait_multi} Degrada a lineal | Degrada a lineal |
+| Pre-analisis {col_ait_pre} Analizar $g$ en compacto | $f'(x_0) \\ne 0$ |
 
 ### Conclusion
 
-Para esta $f(x)$ concreta, ambos metodos convergen a la misma raiz con
-precision equivalente. **Newton** es preferible si la derivada simbolica es
-facil (poco costo extra). **Steffensen** es preferible cuando $f$ es compleja
-o no diferenciable, porque solo necesita evaluar $g$ — con la $g(x)$
-{fmt_decimal(res_steff.extra['L']) if res_steff.extra else '—'}-contractiva
-encontrada por el asistente, la convergencia cuadratica queda garantizada
-sin calcular $f'$.
+- **Aitken** es **post-proceso gratis**: si ya corriste PF, acelerarlo no cuesta
+  evaluaciones. Pero hereda la dependencia de una $g(x)$ contractiva.
+- **Steffensen** convierte la aceleracion en un iterador: reinicia desde
+  $x^*$ cada ciclo y gana orden cuadratico (2 evals de $g$/ciclo).
+- **Newton** es el mas directo si tenes $f'$ analitica (1 eval $f$ + 1 eval $f'$
+  por paso) — no requiere reformular $f$ como $g$.
+
+Para esta $f(x)$, los tres metodos llegan a la misma raiz dentro de la tolerancia
+(dif < {fmt_decimal(max((dif_s_nr or 0), (dif_a_nr if res_ait is not None and dif_a_nr is not None else 0)))}).
+**Newton** gana si la derivada es facil (aca $f'=3x^2-\\cos x$, trivial).
+**Steffensen** gana si $f'$ es dificil o no existe — con $L \\approx {fmt_decimal(res_steff.extra['L']) if res_steff.extra else '—'}$
+el orden cuadratico queda garantizado sin tocar $f'$.
                 """
             )
 

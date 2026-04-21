@@ -553,7 +553,9 @@ def render_newton_raphson() -> None:
         except Exception:
             pass
 
-    tab_resumen, tab_pasos, tab_viz = st.tabs(["Resumen", "Paso a paso", "Visualizaciones"])
+    tab_resumen, tab_pasos, tab_viz, tab_bolzano = st.tabs(
+        ["Resumen", "Paso a paso", "Visualizaciones", "Teorema de Bolzano"]
+    )
 
     # Intervalo para el plot estatico: cubre x0, todas las iteraciones y la raiz,
     # mas un margen del 25%.
@@ -585,6 +587,25 @@ def render_newton_raphson() -> None:
         render_pasos(_construir_pasos(res,
                                         fp_latex=sp.latex(sp.simplify(fp_expr)),
                                         n_pasos=n_pasos), titulo="")
+
+    with tab_bolzano:
+        from utils.ui.bolzano import render_bolzano
+        st.caption(
+            "Newton no requiere cambio de signo en un intervalo, pero si la consigna "
+            "pide 'demostrar por Bolzano que existe raiz' podes usar este bloque. "
+            "Elegi un intervalo [a, b] que contenga a x₀ y la raiz."
+        )
+        col_a_b, col_b_b = st.columns(2)
+        with col_a_b:
+            a_bolz = st.number_input("a (Bolzano)", value=float(min(res.x0, res.raiz or res.x0)) - 1.0,
+                                       format="%.4f", key="nr_bolz_a")
+        with col_b_b:
+            b_bolz = st.number_input("b (Bolzano)", value=float(max(res.x0, res.raiz or res.x0)) + 0.5,
+                                       format="%.4f", key="nr_bolz_b")
+        if a_bolz < b_bolz:
+            render_bolzano(f_np, f_expr, a_bolz, b_bolz, raiz=res.raiz)
+        else:
+            st.error("Se requiere a < b.")
 
     with tab_viz:
         xs_iter = [res.x0] + [it.x_n for it in res.iteraciones] + [it.x_next for it in res.iteraciones]

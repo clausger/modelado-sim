@@ -702,7 +702,8 @@ def render_biseccion() -> None:
             st.plotly_chart(_plot_error(res), use_container_width=True)
 
     with tab_bolzano:
-        _render_tab_bolzano(f_np, expr, a, b, fa, fb, res)
+        from utils.ui.bolzano import render_bolzano
+        render_bolzano(f_np, expr, a, b, raiz=res.raiz)
 
     # Glosario al final si esta activo
     if cfg.mostrar_glosario:
