@@ -648,8 +648,12 @@ def _render_modo_nodos_lagrange(preset_key: str, cfg) -> None:
         st.error(f"No se pudo reconstruir P(x) desde la sesion: {e}")
         return
 
+    def _snap(v: float) -> float:
+        """Elimina ruido de punto flotante (ej: P(1) = 1.22e-16 para sin(pi·x))."""
+        return 0.0 if abs(v) < 1e-12 else float(v)
+
     nodos_sorted = sorted(float(n) for n in nodos)
-    y_nodos = [float(P_np(n)) for n in nodos_sorted]
+    y_nodos = [_snap(float(P_np(n))) for n in nodos_sorted]
 
     st.markdown("#### Nodos disponibles (de Lagrange)")
     df_nodos = pd.DataFrame({
@@ -707,8 +711,8 @@ def _render_modo_nodos_lagrange(preset_key: str, cfg) -> None:
         x_izq = max(izq)
         x_der = min(der)
 
-    y_izq = float(P_np(x_izq))
-    y_der = float(P_np(x_der))
+    y_izq = _snap(float(P_np(x_izq)))
+    y_der = _snap(float(P_np(x_der)))
     h_izq = x_eval - x_izq
     h_der = x_der - x_eval
 
