@@ -29,7 +29,8 @@ from modules.biseccion import (
 )
 from modules.punto_fijo import (
     CriteriosDetencion as CritPF,
-    analizar_convergencia, generar_reformulaciones, punto_fijo, steffensen,
+    analizar_convergencia, g_evaluaciones_steffensen, generar_reformulaciones,
+    punto_fijo, steffensen,
 )
 from modules.newton_raphson import (
     CriteriosDetencion as CritNR, newton_raphson,
@@ -277,7 +278,7 @@ def _correr_steffensen(f_expr: sp.Expr, x_sym: sp.Symbol, f_np,
             )
         analisis.append(
             f"Ciclos totales: **{len(res.ciclos)}** "
-            f"(equivalente a {2 * len(res.ciclos)} evaluaciones de g)."
+            f"(equivalente a {g_evaluaciones_steffensen(res)} evaluaciones de g)."
         )
     else:
         analisis.append(f"**No convergio**: {res.motivo_corte}.")
@@ -292,7 +293,11 @@ def _correr_steffensen(f_expr: sp.Expr, x_sym: sp.Symbol, f_np,
         errores=errores,
         analisis="  \n".join(analisis),
         valor_f_raiz=float(f_np(res.raiz)) if res.raiz is not None else None,
-        extra={"L": an["L"], "g_expr": g_expr, "ciclos": len(res.ciclos)},
+        extra={
+            "L": an["L"], "g_expr": g_expr,
+            "ciclos": len(res.ciclos),
+            "g_evals": g_evaluaciones_steffensen(res),
+        },
     )
 
 
@@ -491,8 +496,14 @@ def render_comparacion() -> None:
     res_nr = next((r for r in resultados if r.nombre == "Newton-Raphson" and r.convergio), None)
     if res_steff is not None and res_nr is not None:
         with st.expander("📝 Analisis comparativo Steffensen vs Newton-Raphson (examen)", expanded=True):
-            n_s = res_steff.iteraciones  # ciclos
-            eval_s = 2 * n_s
+            n_s = res_steff.iteraciones  # ciclos realmente ejecutados
+            # SIEMPRE recalculado desde la corrida actual — nunca cacheado.
+            # Fuente unica de verdad: comparacion_raices usa el helper centralizado
+            # via extra['g_evals'], garantizando consistencia con punto_fijo.py.
+            eval_s = res_steff.extra.get("g_evals", 2 * n_s) if res_steff.extra else 2 * n_s
+            assert eval_s == 2 * n_s, (
+                f"Inconsistencia: ciclos={n_s}, evals={eval_s} (deberian ser 2*ciclos)"
+            )
             n_nr = res_nr.iteraciones
             orden_s = _estimar_orden_convergencia(res_steff.errores)
             orden_nr = _estimar_orden_convergencia(res_nr.errores)

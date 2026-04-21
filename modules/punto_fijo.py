@@ -702,6 +702,18 @@ def steffensen(
     return res
 
 
+def g_evaluaciones_steffensen(res: ResultadoSteffensen) -> int:
+    """Cuenta evaluaciones de g en una corrida de Steffensen.
+
+    Convencion de catedra: cada ciclo evalua g exactamente 2 veces
+    (x_{n+1} = g(x_n) y x_{n+2} = g(x_{n+1})). Siempre se cuenta sobre
+    los ciclos realmente ejecutados (res.ciclos), nunca sobre valores
+    cacheados. Centralizado para garantizar consistencia entre resumen,
+    tabla y accordion de examen.
+    """
+    return 2 * len(res.ciclos)
+
+
 def _tabla_steffensen(res: ResultadoSteffensen) -> pd.DataFrame:
     filas = []
     for c in res.ciclos:
@@ -1113,7 +1125,7 @@ enganoso.
                 raiz_pf_s = fmt_decimal(res.raiz) if res.raiz is not None else "—"
                 n_pf_s = len(res.iteraciones)
                 n_s = len(res_steff.ciclos)
-                evaluaciones_s = 2 * n_s  # Steffensen hace 2 eval de g por ciclo
+                evaluaciones_s = g_evaluaciones_steffensen(res_steff)
                 st.markdown(
                     f"""
 **Metodo de Steffensen** (Aitken como iteracion): cada ciclo parte de una
