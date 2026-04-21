@@ -770,6 +770,142 @@ def _render_modo_nodos_lagrange(preset_key: str, cfg) -> None:
             "alrededor del punto de interes) para mejorar la aproximacion."
         )
 
+    # --- Paso a paso con valores reemplazados ---
+    with st.expander("Paso a paso (valores reemplazados)", expanded=False):
+        pasos: list[Paso] = []
+        pasos.append(Paso(
+            titulo="Paso 1 — Identificar los nodos vecinos",
+            formula=(rf"x = {fmt_decimal(x_eval)}, "
+                     rf"\quad x_{{\text{{izq}}}} = {fmt_decimal(x_izq)}, "
+                     rf"\quad x_{{\text{{der}}}} = {fmt_decimal(x_der)}"),
+            explicacion_tecnica=(
+                "En el modo 'datos discretos' no podemos elegir h libremente: los "
+                f"vecinos mas cercanos al punto x = {fmt_decimal(x_eval)} en la "
+                "tabla son los que fijan el calculo."
+            ),
+            explicacion_coloquial=(
+                f"Miro a izquierda y derecha de {fmt_decimal(x_eval)} entre los "
+                f"nodos disponibles; los mas cercanos son {fmt_decimal(x_izq)} y "
+                f"{fmt_decimal(x_der)}."
+            ),
+        ))
+        pasos.append(Paso(
+            titulo="Paso 2 — Leer los y_i en cada vecino",
+            formula=(rf"y_{{\text{{izq}}}} = P({fmt_decimal(x_izq)}) = {fmt_decimal(y_izq)} "
+                     rf"\quad y_{{\text{{der}}}} = P({fmt_decimal(x_der)}) = {fmt_decimal(y_der)}"),
+            explicacion_tecnica=(
+                "Uso los valores que el polinomio interpolante asigna a cada nodo "
+                "(coinciden con los datos originales por construccion)."
+            ),
+        ))
+        pasos.append(Paso(
+            titulo="Paso 3 — Distancias (h no uniforme)",
+            formula=(rf"h_{{\text{{izq}}}} = x - x_{{\text{{izq}}}} = {fmt_decimal(h_izq)} "
+                     rf"\quad h_{{\text{{der}}}} = x_{{\text{{der}}}} - x = {fmt_decimal(h_der)}"),
+            explicacion_tecnica=(
+                "Si h_izq = h_der, los nodos estan equiespaciados respecto del "
+                "punto de evaluacion y la formula equivale a la central clasica. "
+                "Si no, se aplica la central no uniforme."
+            ),
+        ))
+        pasos.append(Paso(
+            titulo="Paso 4 — Formula central no uniforme (general)",
+            formula=(r"f'(x) \approx \frac{y_{\text{der}} - y_{\text{izq}}}"
+                     r"{x_{\text{der}} - x_{\text{izq}}}"),
+            explicacion_tecnica=(
+                "Es la pendiente de la secante entre los dos vecinos. Para nodos "
+                "equiespaciados coincide con (f(x+h)-f(x-h))/(2h)."
+            ),
+        ))
+        pasos.append(Paso(
+            titulo="Paso 5 — Sustitucion numerica",
+            formula=(rf"f'({fmt_decimal(x_eval)}) \approx "
+                     rf"\frac{{{fmt_decimal(y_der)} - {fmt_decimal(y_izq)}}}"
+                     rf"{{{fmt_decimal(x_der)} - {fmt_decimal(x_izq)}}} "
+                     rf"= \frac{{{fmt_decimal(y_der - y_izq)}}}"
+                     rf"{{{fmt_decimal(x_der - x_izq)}}} "
+                     rf"= {fmt_decimal(fp_aprox)}"),
+        ))
+        pasos.append(Paso(
+            titulo="Paso 6 — Comparacion con la derivada exacta de P(x)",
+            formula=(rf"P'(x) = {sp.latex(Pp_expr)} "
+                     rf"\Rightarrow P'({fmt_decimal(x_eval)}) = {fmt_decimal(fp_exacta)}"),
+            resultado=(rf"|\text{{err}}| = {fmt_decimal(err_abs)}, "
+                        rf"\quad \text{{err rel}} = {fmt_decimal(err_rel)}\% "
+                        + (r"\le" if cumple else r">")
+                        + rf" {fmt_decimal(tol_pct)}\%"),
+            explicacion_tecnica=(
+                f"El criterio del enunciado (err < {fmt_decimal(tol_pct)}%) "
+                + ("se cumple." if cumple else
+                   "NO se cumple — y con estos nodos no se puede mejorar: hay "
+                   "que agregar mas nodos al interpolante.")
+            ),
+        ))
+        render_pasos(pasos, titulo="")
+
+    # --- Texto listo para copiar al examen ---
+    with st.expander("📝 Texto listo para copiar al examen", expanded=False):
+        try:
+            P_latex_txt = sp.latex(P_expr)
+            Pp_latex_txt = sp.latex(Pp_expr)
+        except Exception:
+            P_latex_txt = "P(x)"
+            Pp_latex_txt = "P'(x)"
+        tabla_nodos_md = "\n".join(
+            f"| {fmt_decimal(xi)} | {fmt_decimal(yi)} |"
+            for xi, yi in zip(nodos_sorted, y_nodos)
+        )
+        estado = ("**cumple** el criterio" if cumple
+                   else "**NO cumple** el criterio")
+        cierre = (
+            f"El error relativo es {fmt_decimal(err_rel)}% "
+            + ("≤ " if cumple else "> ")
+            + f"{fmt_decimal(tol_pct)}%, por lo que la aproximacion {estado} "
+            "pedido por el enunciado."
+            + ("" if cumple else
+               " **Limitacion de datos discretos**: con los nodos disponibles "
+               "h esta fijado y no se puede reducir. Para mejorar la "
+               "aproximacion habria que **agregar mas nodos** al interpolante "
+               "de Lagrange, especialmente cerca del punto de interes.")
+        )
+
+        texto = f"""
+**Derivada numerica sobre datos discretos** (nodos del interpolante de Lagrange)
+
+**Polinomio interpolante:**
+$$P(x) = {P_latex_txt}$$
+
+**Derivada exacta del interpolante (referencia):**
+$$P'(x) = {Pp_latex_txt}$$
+
+**Tabla de nodos disponibles:**
+
+| x_i | y_i = P(x_i) |
+|---|---|
+{tabla_nodos_md}
+
+**Procedimiento.** En el modo de **datos discretos** no se elige $h$ libremente:
+queda fijado por los nodos vecinos. Para derivar en $x = {fmt_decimal(x_eval)}$
+elegimos los vecinos mas cercanos a izquierda y derecha:
+$x_{{\\text{{izq}}}} = {fmt_decimal(x_izq)}$ y $x_{{\\text{{der}}}} = {fmt_decimal(x_der)}$,
+con $h_{{\\text{{izq}}}} = {fmt_decimal(h_izq)}$ y $h_{{\\text{{der}}}} = {fmt_decimal(h_der)}$.
+
+**Formula central no uniforme:**
+$$f'(x) \\approx \\frac{{y_{{\\text{{der}}}} - y_{{\\text{{izq}}}}}}{{x_{{\\text{{der}}}} - x_{{\\text{{izq}}}}}}$$
+
+**Sustitucion numerica:**
+$$f'({fmt_decimal(x_eval)}) \\approx \\frac{{{fmt_decimal(y_der)} - {fmt_decimal(y_izq)}}}{{{fmt_decimal(x_der)} - {fmt_decimal(x_izq)}}} = {fmt_decimal(fp_aprox)}$$
+
+**Comparacion con la derivada exacta del interpolante:**
+- $P'({fmt_decimal(x_eval)}) = {fmt_decimal(fp_exacta)}$
+- Error absoluto: $|f'_{{\\text{{aprox}}}} - P'(x)| = {fmt_decimal(err_abs)}$
+- Error relativo: $\\dfrac{{|f'_{{\\text{{aprox}}}} - P'(x)|}}{{|P'(x)|}} \\cdot 100 = {fmt_decimal(err_rel)}\\%$
+
+**Conclusion.** {cierre}
+"""
+        st.markdown(texto)
+        st.code(texto, language="markdown")
+
 
 def render() -> None:
     render_derivacion()
