@@ -502,9 +502,24 @@ def render_comparacion() -> None:
             # NO es 2*ciclos cuando el residuo esta activo (cada ciclo con check
             # de residuo agrega 1 evaluacion extra de g).
             eval_s = res_steff.extra.get("g_evals", 2 * n_s) if res_steff.extra else 2 * n_s
+            # Evaluaciones por paso observadas (puede ser 2 o 3 segun residuo)
+            evals_por_ciclo_s = eval_s / n_s if n_s > 0 else 2.0
+            evals_por_ciclo_s_str = (f"{int(evals_por_ciclo_s)}" if evals_por_ciclo_s == int(evals_por_ciclo_s)
+                                        else f"{evals_por_ciclo_s:.1f}")
             n_nr = res_nr.iteraciones
             orden_s = _estimar_orden_convergencia(res_steff.errores)
             orden_nr = _estimar_orden_convergencia(res_nr.errores)
+
+            def _fmt_orden(orden, n_datos, teorico="2"):
+                if orden is not None:
+                    return fmt_decimal(orden, 3)
+                if n_datos < 4:
+                    return f"sin datos suficientes ({n_datos} puntos; se necesitan ≥4) — teorico: {teorico}"
+                return f"no estimable — teorico: {teorico}"
+
+            orden_s_str = _fmt_orden(orden_s, len(res_steff.errores))
+            orden_nr_str = _fmt_orden(orden_nr, len(res_nr.errores))
+
             raiz_s = fmt_decimal(res_steff.raiz) if res_steff.raiz is not None else "—"
             raiz_nr = fmt_decimal(res_nr.raiz) if res_nr.raiz is not None else "—"
             dif_raices = abs(res_steff.raiz - res_nr.raiz) if (res_steff.raiz is not None and res_nr.raiz is not None) else None
@@ -513,10 +528,8 @@ def render_comparacion() -> None:
                 f"""
 ### Velocidad de convergencia
 
-- **Steffensen**: {n_s} ciclos ({eval_s} evaluaciones de $g$) — orden empirico p ≈
-  {fmt_decimal(orden_s, 3) if orden_s else '—'}.
-- **Newton-Raphson**: {n_nr} iteraciones ({n_nr} evaluaciones de $f$ + {n_nr} de $f'$) —
-  orden empirico p ≈ {fmt_decimal(orden_nr, 3) if orden_nr else '—'}.
+- **Steffensen**: {n_s} ciclos ({eval_s} evaluaciones de $g$, {evals_por_ciclo_s_str}/ciclo) — orden empirico p ≈ {orden_s_str}.
+- **Newton-Raphson**: {n_nr} iteraciones ({n_nr} evaluaciones de $f$ + {n_nr} de $f'$) — orden empirico p ≈ {orden_nr_str}.
 
 Ambos son de **orden cuadratico teorico** (p = 2). En la practica, Newton suele
 necesitar menos iteraciones porque cada paso ya incorpora informacion de la
@@ -537,7 +550,7 @@ diferencia observada esta dentro de la tolerancia pedida ({fmt_decimal(tol)}).
 |---|---|---|
 | Derivada $f'(x)$ | No requiere | Requerida |
 | Reformulacion $x = g(x)$ | Requerida (y debe cumplir $\|g'\| < 1$) | No aplica |
-| Evaluaciones por paso | 2 de $g$ | 1 de $f$ + 1 de $f'$ |
+| Evaluaciones por paso | {evals_por_ciclo_s_str} de $g$ (2 base + 1 extra si se chequea residuo) | 1 de $f$ + 1 de $f'$ |
 | Comportamiento ante raices multiples | Degrada a lineal | Degrada a lineal |
 | Pre-analisis de convergencia | Analizar $g$ en compacto | Chequear $f'(x_0) \\ne 0$ |
 
