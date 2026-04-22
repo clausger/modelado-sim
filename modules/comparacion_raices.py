@@ -339,7 +339,7 @@ def _correr_aitken(f_expr: sp.Expr, x_sym: sp.Symbol, f_np,
 
     t0 = time.perf_counter()
     res = punto_fijo(g_np, x0, crit, a, b, L_estimado=L, precision=precision)
-    secuencia = [x0] + [it.x_n1 for it in res.iteraciones]
+    secuencia = [x0] + [it.g_xn for it in res.iteraciones]
     acel = aitken_acelerar(secuencia)
     dt = (time.perf_counter() - t0) * 1000
 
