@@ -31,6 +31,48 @@ from utils.ui.pasos import Paso, render_pasos
 from utils.ui.tablas import fmt_decimal, render_tabla_iteraciones
 from utils.ui.teoria import render_teoria
 
+_SYMPY_LOCALS = {
+    "pi": sp.pi, "Pi": sp.pi, "PI": sp.pi,
+    "e": sp.E, "E": sp.E,
+    "sqrt": sp.sqrt, "sin": sp.sin, "cos": sp.cos, "tan": sp.tan,
+    "log": sp.log, "ln": sp.log, "exp": sp.exp,
+}
+
+
+def _parse_symbolic_float(s, label: str = "valor") -> float:
+    """Parsea un string posiblemente simbolico ('pi/2', 'sqrt(2)', '1.5') a float.
+
+    Acepta tambien numeros ya float/int. Lanza ValueError con mensaje claro.
+    """
+    if isinstance(s, (int, float, np.integer, np.floating)):
+        return float(s)
+    txt = str(s).strip()
+    if not txt:
+        raise ValueError(f"{label}: vacio")
+    try:
+        expr = sp.sympify(txt, locals=_SYMPY_LOCALS)
+        return float(expr.evalf())
+    except Exception as e:
+        raise ValueError(f"No pude interpretar '{txt}' como numero ({label}): {e}")
+
+
+def _expr_to_display_str(v) -> str:
+    """Convierte float a string legible; reconoce multiplos de pi."""
+    try:
+        f = float(v)
+    except Exception:
+        return str(v)
+    try:
+        sym = sp.nsimplify(f, [sp.pi], rational=False, tolerance=1e-9)
+        s = str(sym)
+        # Prefiero mostrar "pi/2" si sympy devolvio algo con pi
+        if "pi" in s:
+            return s
+    except Exception:
+        pass
+    return f"{f:.6g}"
+
+
 # --- Banco de ejercicios (Caceres pg 25-26) ---
 
 EJERCICIOS: dict[str, dict] = {
@@ -113,25 +155,55 @@ class ResultadoLagrange:
     x_sym: sp.Symbol
 
 
-def construir_lagrange(x_pts: list[float], y_pts: list[float]) -> ResultadoLagrange:
-    """Construye simbolicamente el polinomio P(x) y cada base L_i(x)."""
+def _to_sym_node(v) -> sp.Expr:
+    """Convierte un nodo a expresion sympy preservando multiplos de pi.
+
+    Evita que pi/2 → 1.5707963... → Rational con denominador enorme.
+    """
+    if isinstance(v, sp.Expr):
+        return v
+    try:
+        sym = sp.nsimplify(v, [sp.pi], rational=False, tolerance=1e-9)
+        # Si no aparece pi, preferimos un Rational limpio desde el string.
+        if not sym.has(sp.pi):
+            try:
+                return sp.Rational(str(v))
+            except Exception:
+                return sym
+        return sym
+    except Exception:
+        try:
+            return sp.Rational(str(v))
+        except Exception:
+            return sp.nsimplify(v)
+
+
+def construir_lagrange(x_pts: list, y_pts: list) -> ResultadoLagrange:
+    """Construye simbolicamente el polinomio P(x) y cada base L_i(x).
+
+    Acepta nodos y valores como floats, strings o sympy.Expr. Reconoce
+    multiplos de pi para mantener la forma exacta (ej: pi/2, no 1.5707...).
+    """
     x = sp.Symbol("x")
     n = len(x_pts)
+    x_sym_pts = [_to_sym_node(v) for v in x_pts]
+    y_sym_pts = [_to_sym_node(v) for v in y_pts]
     bases: list[sp.Expr] = []
     P = sp.Integer(0)
     for i in range(n):
         li = sp.Integer(1)
         for j in range(n):
             if i != j:
-                li *= (x - sp.Rational(str(x_pts[j]))) / (
-                    sp.Rational(str(x_pts[i])) - sp.Rational(str(x_pts[j]))
-                )
+                li *= (x - x_sym_pts[j]) / (x_sym_pts[i] - x_sym_pts[j])
         li_simpl = sp.simplify(li)
         bases.append(li_simpl)
-        P += sp.Rational(str(y_pts[i])) * li_simpl if _is_rational(y_pts[i]) else y_pts[i] * li_simpl
+        P += y_sym_pts[i] * li_simpl
     P_exp = sp.expand(P)
+    # Exponer floats numericos hacia afuera (UI usa floats).
+    x_pts_num = [float(v.evalf()) if isinstance(v, sp.Expr) else float(v) for v in x_sym_pts]
+    y_pts_num = [float(v.evalf()) if isinstance(v, sp.Expr) else float(v) for v in y_sym_pts]
     return ResultadoLagrange(
-        x_pts=list(x_pts), y_pts=list(y_pts),
+        x_pts=x_pts_num, y_pts=y_pts_num,
         P_expr=P, P_expandido=P_exp, bases=bases, x_sym=x,
     )
 
@@ -420,19 +492,36 @@ def render_lagrange() -> None:
     x_default = preset.get("x_pts", [0.0, 1.0, 2.0])
     y_default = preset.get("y_pts", [1.0, 2.0, 5.0])
 
-    df_default = pd.DataFrame({"x_i": x_default, "y_i": y_default})
+    # x_i como texto para permitir expresiones simbolicas ("pi/2", "sqrt(2)", "1/3").
+    x_default_str = [_expr_to_display_str(v) for v in x_default]
+    y_default_str = [_expr_to_display_str(v) for v in y_default]
+
+    st.caption(
+        "Podes escribir expresiones simbolicas en x_i / y_i: `pi`, `pi/2`, `sqrt(2)`, `1/3`, `e`."
+    )
+
+    df_default = pd.DataFrame({"x_i": x_default_str, "y_i": y_default_str})
     df_edit = st.data_editor(
         df_default, num_rows="dynamic", use_container_width=True,
         key=f"lagrange_puntos_{preset_key}",
         column_config={
-            "x_i": st.column_config.NumberColumn("x_i", format="%.6f"),
-            "y_i": st.column_config.NumberColumn("y_i", format="%.6f"),
+            "x_i": st.column_config.TextColumn(
+                "x_i", help="Numero o expresion (pi/2, sqrt(2), 1/3, ...)"
+            ),
+            "y_i": st.column_config.TextColumn(
+                "y_i", help="Numero o expresion; ignorado si autocalcular y_i esta activado"
+            ),
         },
     )
 
     try:
-        x_pts = df_edit["x_i"].dropna().astype(float).tolist()
-        y_pts = df_edit["y_i"].dropna().astype(float).tolist()
+        x_raw = [s for s in df_edit["x_i"].tolist() if s not in (None, "")]
+        y_raw = [s for s in df_edit["y_i"].tolist() if s not in (None, "")]
+        x_pts = [_parse_symbolic_float(s, f"x_i fila {i+1}") for i, s in enumerate(x_raw)]
+        y_pts = [_parse_symbolic_float(s, f"y_i fila {i+1}") for i, s in enumerate(y_raw)]
+    except ValueError as e:
+        st.error(str(e))
+        return
     except Exception as e:
         st.error(f"Error al parsear los puntos: {e}")
         return
@@ -506,13 +595,29 @@ def render_lagrange() -> None:
     st.session_state["shared_lagrange_P_latex"] = sp.latex(res.P_expandido)
     st.session_state["shared_lagrange_P_sympy"] = str(res.P_expandido)
     st.session_state["shared_lagrange_nodes"] = [float(v) for v in x_pts]
+    # Exponer f(x) original (si esta) para que Derivacion compare contra la
+    # derivada ANALITICA de la funcion real — no contra P'(x), que tambien
+    # es una aproximacion. Si no hay f(x), Derivacion cae a P'(x) como fallback.
+    if f_expr is not None:
+        st.session_state["shared_lagrange_f_sympy"] = str(f_expr)
+    else:
+        st.session_state.pop("shared_lagrange_f_sympy", None)
 
     x_eval_default = float(preset.get("x_eval", (x_pts[0] + x_pts[-1]) / 2))
+    x_eval_default_str = _expr_to_display_str(x_eval_default)
     col_eval, col_info = st.columns([1, 2])
     with col_eval:
-        x_eval = st.number_input("Evaluar P(x) en x =",
-                                   value=x_eval_default, format="%.6f",
-                                   key=f"lagrange_xeval_{preset_key}")
+        x_eval_str = st.text_input(
+            "Evaluar P(x) en x =",
+            value=x_eval_default_str,
+            key=f"lagrange_xeval_{preset_key}",
+            help="Acepta expresiones: pi/4, sqrt(2), 1/3, ...",
+        )
+        try:
+            x_eval = _parse_symbolic_float(x_eval_str, "x de evaluacion")
+        except ValueError as e:
+            st.error(str(e))
+            return
     y_eval = evaluar(res, x_eval)
     with col_info:
         es_extrap = x_eval < min(x_pts) or x_eval > max(x_pts)

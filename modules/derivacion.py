@@ -29,6 +29,8 @@ from utils.ui.pasos import Paso, render_pasos
 from utils.ui.tablas import fmt_decimal, render_tabla_iteraciones
 from utils.ui.teoria import render_teoria
 
+from modules.lagrange import _expr_to_display_str, _parse_symbolic_float
+
 # --- Banco de ejercicios (Caceres pg 26) ---
 
 EJERCICIOS: dict[str, dict] = {
@@ -457,13 +459,25 @@ def _render_modo_funcion(preset: dict, preset_key: str, cfg) -> None:
     with col_grid:
         grid_str = st.text_input(
             "Puntos donde derivar (separados por coma)",
-            value=", ".join(fmt_decimal(v) for v in x_grid_default),
+            value=", ".join(_expr_to_display_str(v) for v in x_grid_default),
             key=f"deriv_grid_{preset_key}",
+            help="Acepta expresiones simbolicas: pi/2, sqrt(2), pi/4, ...",
         )
     with col_h:
-        h = st.number_input("Paso h", value=float(preset.get("h", 0.1)),
-                              format="%.6f", min_value=1e-12, step=0.01,
-                              key=f"deriv_h_{preset_key}")
+        h_str = st.text_input(
+            "Paso h",
+            value=_expr_to_display_str(float(preset.get("h", 0.1))),
+            key=f"deriv_h_{preset_key}",
+            help="Acepta expresiones: pi/100, 0.01, 1/8, ...",
+        )
+        try:
+            h = _parse_symbolic_float(h_str, "h")
+            if h <= 0:
+                st.error("h debe ser > 0.")
+                return
+        except ValueError as e:
+            st.error(str(e))
+            return
     with col_tol:
         tol_pct = st.number_input(
             "Tolerancia error % (central)",
@@ -475,7 +489,14 @@ def _render_modo_funcion(preset: dict, preset_key: str, cfg) -> None:
         )
 
     try:
-        xs = [float(s.strip()) for s in grid_str.split(",") if s.strip()]
+        xs = [
+            _parse_symbolic_float(s.strip(), f"punto {i+1}")
+            for i, s in enumerate(grid_str.split(","))
+            if s.strip()
+        ]
+    except ValueError as e:
+        st.error(str(e))
+        return
     except Exception as e:
         st.error(f"No se pudieron parsear los puntos: {e}")
         return
@@ -648,6 +669,23 @@ def _render_modo_nodos_lagrange(preset_key: str, cfg) -> None:
         st.error(f"No se pudo reconstruir P(x) desde la sesion: {e}")
         return
 
+    # Si Lagrange expuso la f(x) original, usamos f'(x) como referencia EXACTA.
+    # El polinomio interpolante es otra aproximacion, no la "verdad"; compararse
+    # contra P'(x) subestima el error real. Solo cae a P'(x) si no hay f(x).
+    f_sympy_str = st.session_state.get("shared_lagrange_f_sympy")
+    f_expr_orig: sp.Expr | None = None
+    fp_expr_orig: sp.Expr | None = None
+    fp_np_orig = None
+    if f_sympy_str:
+        try:
+            f_expr_orig = sp.sympify(f_sympy_str, locals={"x": x_sym})
+            fp_expr_orig = sp.simplify(sp.diff(f_expr_orig, x_sym))
+            fp_np_orig = sp.lambdify(x_sym, fp_expr_orig, modules=["numpy"])
+        except Exception:
+            f_expr_orig = None
+            fp_expr_orig = None
+            fp_np_orig = None
+
     def _snap(v: float) -> float:
         """Elimina ruido de punto flotante (ej: P(1) = 1.22e-16 para sin(pi·x))."""
         return 0.0 if abs(v) < 1e-12 else float(v)
@@ -662,20 +700,39 @@ def _render_modo_nodos_lagrange(preset_key: str, cfg) -> None:
     })
     render_tabla_iteraciones(df_nodos, titulo=None, key_export="deriv_nodos_lag")
     st.latex(rf"P(x) = {sp.latex(P_expr)}")
-    st.caption(f"Derivada simbolica (referencia exacta): $P'(x) = {sp.latex(Pp_expr)}$")
+    if fp_expr_orig is not None:
+        st.caption(
+            f"Referencia exacta disponible: $f(x) = {sp.latex(f_expr_orig)}$  "
+            f"⇒  $f'(x) = {sp.latex(fp_expr_orig)}$"
+        )
+        st.caption(f"(tambien se calculo $P'(x) = {sp.latex(Pp_expr)}$ para comparar)")
+    else:
+        st.caption(f"Referencia (fallback): $P'(x) = {sp.latex(Pp_expr)}$  "
+                    "(no se provee f(x) original; P'(x) es la mejor referencia disponible)")
 
     col_x, col_tol = st.columns(2)
     with col_x:
         x_default = float((nodos_sorted[0] + nodos_sorted[-1]) / 2)
-        x_eval = st.number_input(
+        x_eval_str = st.text_input(
             "Derivar en x =",
-            value=x_default, format="%.6f",
-            min_value=float(nodos_sorted[0]),
-            max_value=float(nodos_sorted[-1]),
+            value=_expr_to_display_str(x_default),
             key=f"deriv_lag_x_{preset_key}",
-            help="Debe caer dentro del rango de nodos. Los vecinos mas cercanos "
+            help="Acepta expresiones simbolicas (pi/4, sqrt(2), ...). "
+                  "Debe caer dentro del rango de nodos. Los vecinos mas cercanos "
                   "(izquierdo y derecho) se eligen automaticamente.",
         )
+        try:
+            x_eval = _parse_symbolic_float(x_eval_str, "x")
+        except ValueError as e:
+            st.error(str(e))
+            return
+        x_lo, x_hi = float(nodos_sorted[0]), float(nodos_sorted[-1])
+        if not (x_lo <= x_eval <= x_hi):
+            st.error(
+                f"x = {fmt_decimal(x_eval)} esta fuera del rango de nodos "
+                f"[{fmt_decimal(x_lo)}, {fmt_decimal(x_hi)}]."
+            )
+            return
     with col_tol:
         tol_pct = st.number_input(
             "Tolerancia error % (central)",
@@ -718,9 +775,20 @@ def _render_modo_nodos_lagrange(preset_key: str, cfg) -> None:
 
     # Formula central no-uniforme: pendiente de la secante entre vecinos.
     fp_aprox = (y_der - y_izq) / (x_der - x_izq)
-    fp_exacta = float(Pp_np(x_eval))
-    err_abs = abs(fp_aprox - fp_exacta)
-    err_rel = err_abs / abs(fp_exacta) * 100 if abs(fp_exacta) > 1e-15 else float("nan")
+    # Referencia: f'(x) si esta disponible, sino P'(x) como fallback.
+    fp_Pprime = float(Pp_np(x_eval))
+    if fp_np_orig is not None:
+        fp_ref = float(fp_np_orig(x_eval))
+        ref_tex = rf"f'({fmt_decimal(x_eval)})"
+        ref_label = "f'(x) real"
+        ref_fuente = "derivada analitica de f(x) original"
+    else:
+        fp_ref = fp_Pprime
+        ref_tex = rf"P'({fmt_decimal(x_eval)})"
+        ref_label = "P'(x)"
+        ref_fuente = "derivada del polinomio interpolante (fallback: no hay f(x) original)"
+    err_abs = abs(fp_aprox - fp_ref)
+    err_rel = err_abs / abs(fp_ref) * 100 if abs(fp_ref) > 1e-15 else float("nan")
     cumple = err_rel <= tol_pct
 
     # Aviso fijo (naranja) explicando la limitacion de datos discretos.
@@ -748,13 +816,26 @@ def _render_modo_nodos_lagrange(preset_key: str, cfg) -> None:
         rf"{{{fmt_decimal(x_der)} - {fmt_decimal(x_izq)}}} = {fmt_decimal(fp_aprox)}"
     )
 
-    st.markdown("#### Comparacion con P'(x) exacta")
-    c1, c2, c3 = st.columns(3)
-    c1.metric("f'(x) aprox", fmt_decimal(fp_aprox))
-    c2.metric("P'(x) exacta", fmt_decimal(fp_exacta))
-    c3.metric("|err abs|", fmt_decimal(err_abs),
-               delta=f"{fmt_decimal(err_rel)}%",
-               delta_color=("normal" if cumple else "inverse"))
+    st.markdown(f"#### Comparacion con {ref_label}")
+    st.caption(f"Referencia: {ref_fuente}")
+    if fp_np_orig is not None:
+        # Con f(x) disponible, mostramos las 4 columnas: aprox / f' real / P' / error
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("f'(x) aprox", fmt_decimal(fp_aprox))
+        c2.metric("f'(x) real", fmt_decimal(fp_ref))
+        c3.metric("P'(x)", fmt_decimal(fp_Pprime),
+                  delta=f"{fmt_decimal(abs(fp_aprox-fp_Pprime))}",
+                  delta_color="off")
+        c4.metric("|err vs f'(x)|", fmt_decimal(err_abs),
+                   delta=f"{fmt_decimal(err_rel)}%",
+                   delta_color=("normal" if cumple else "inverse"))
+    else:
+        c1, c2, c3 = st.columns(3)
+        c1.metric("f'(x) aprox", fmt_decimal(fp_aprox))
+        c2.metric(ref_label, fmt_decimal(fp_ref))
+        c3.metric("|err abs|", fmt_decimal(err_abs),
+                   delta=f"{fmt_decimal(err_rel)}%",
+                   delta_color=("normal" if cumple else "inverse"))
 
     if cumple:
         st.success(
@@ -826,20 +907,43 @@ def _render_modo_nodos_lagrange(preset_key: str, cfg) -> None:
                      rf"{{{fmt_decimal(x_der - x_izq)}}} "
                      rf"= {fmt_decimal(fp_aprox)}"),
         ))
+        if fp_expr_orig is not None:
+            paso6_titulo = "Paso 6 — Comparacion con la derivada EXACTA f'(x) de la funcion original"
+            paso6_formula = (
+                rf"f'(x) = {sp.latex(fp_expr_orig)} "
+                rf"\Rightarrow f'({fmt_decimal(x_eval)}) = {fmt_decimal(fp_ref)}"
+            )
+            paso6_tec = (
+                "Como disponemos de la funcion original f(x), comparamos contra "
+                "su derivada analitica — la referencia correcta. "
+                f"(P'({fmt_decimal(x_eval)}) = {fmt_decimal(fp_Pprime)} es otra "
+                "aproximacion: derivar el interpolante no da la derivada real.)  "
+                f"El criterio del enunciado (err < {fmt_decimal(tol_pct)}%) "
+                + ("se cumple." if cumple else
+                   "NO se cumple — con estos nodos no se puede mejorar: hay "
+                   "que agregar mas nodos al interpolante.")
+            )
+        else:
+            paso6_titulo = "Paso 6 — Comparacion con la derivada del interpolante P(x)"
+            paso6_formula = (
+                rf"P'(x) = {sp.latex(Pp_expr)} "
+                rf"\Rightarrow P'({fmt_decimal(x_eval)}) = {fmt_decimal(fp_ref)}"
+            )
+            paso6_tec = (
+                "Sin f(x) original, la mejor referencia disponible es la derivada "
+                "analitica del interpolante P(x). (Nota: esto subestima el error "
+                "verdadero si la aproximacion de Lagrange no es buena). "
+                f"El criterio del enunciado (err < {fmt_decimal(tol_pct)}%) "
+                + ("se cumple." if cumple else "NO se cumple.")
+            )
         pasos.append(Paso(
-            titulo="Paso 6 — Comparacion con la derivada exacta de P(x)",
-            formula=(rf"P'(x) = {sp.latex(Pp_expr)} "
-                     rf"\Rightarrow P'({fmt_decimal(x_eval)}) = {fmt_decimal(fp_exacta)}"),
+            titulo=paso6_titulo,
+            formula=paso6_formula,
             resultado=(rf"|\text{{err}}| = {fmt_decimal(err_abs)}, "
                         rf"\quad \text{{err rel}} = {fmt_decimal(err_rel)}\% "
                         + (r"\le" if cumple else r">")
                         + rf" {fmt_decimal(tol_pct)}\%"),
-            explicacion_tecnica=(
-                f"El criterio del enunciado (err < {fmt_decimal(tol_pct)}%) "
-                + ("se cumple." if cumple else
-                   "NO se cumple — y con estos nodos no se puede mejorar: hay "
-                   "que agregar mas nodos al interpolante.")
-            ),
+            explicacion_tecnica=paso6_tec,
         ))
         render_pasos(pasos, titulo="")
 
@@ -869,14 +973,37 @@ def _render_modo_nodos_lagrange(preset_key: str, cfg) -> None:
                "de Lagrange, especialmente cerca del punto de interes.")
         )
 
+        if fp_expr_orig is not None:
+            fp_latex_txt = sp.latex(fp_expr_orig)
+            f_latex_txt = sp.latex(f_expr_orig)
+            bloque_referencia = f"""**Referencia exacta** (derivada analitica de f(x)):
+$$f(x) = {f_latex_txt} \\Rightarrow f'(x) = {fp_latex_txt}$$
+
+**Derivada del interpolante** (solo para comparar — no es la referencia verdadera):
+$$P'(x) = {Pp_latex_txt}$$"""
+            bloque_comparacion = f"""**Comparacion con la derivada EXACTA f'(x):**
+- $f'({fmt_decimal(x_eval)}) = {fmt_decimal(fp_ref)}$  (valor exacto)
+- $P'({fmt_decimal(x_eval)}) = {fmt_decimal(fp_Pprime)}$  (derivada del interpolante)
+- Error absoluto: $|f'_{{\\text{{aprox}}}} - f'(x)| = {fmt_decimal(err_abs)}$
+- Error relativo: $\\dfrac{{|f'_{{\\text{{aprox}}}} - f'(x)|}}{{|f'(x)|}} \\cdot 100 = {fmt_decimal(err_rel)}\\%$"""
+        else:
+            bloque_referencia = f"""**Derivada exacta del interpolante (referencia — fallback):**
+$$P'(x) = {Pp_latex_txt}$$
+
+_Nota: sin f(x) original, comparamos contra P'(x). Esto subestima el error real
+si la interpolacion no fuera exacta._"""
+            bloque_comparacion = f"""**Comparacion con la derivada del interpolante:**
+- $P'({fmt_decimal(x_eval)}) = {fmt_decimal(fp_ref)}$
+- Error absoluto: $|f'_{{\\text{{aprox}}}} - P'(x)| = {fmt_decimal(err_abs)}$
+- Error relativo: $\\dfrac{{|f'_{{\\text{{aprox}}}} - P'(x)|}}{{|P'(x)|}} \\cdot 100 = {fmt_decimal(err_rel)}\\%$"""
+
         texto = f"""
 **Derivada numerica sobre datos discretos** (nodos del interpolante de Lagrange)
 
 **Polinomio interpolante:**
 $$P(x) = {P_latex_txt}$$
 
-**Derivada exacta del interpolante (referencia):**
-$$P'(x) = {Pp_latex_txt}$$
+{bloque_referencia}
 
 **Tabla de nodos disponibles:**
 
@@ -896,10 +1023,7 @@ $$f'(x) \\approx \\frac{{y_{{\\text{{der}}}} - y_{{\\text{{izq}}}}}}{{x_{{\\text
 **Sustitucion numerica:**
 $$f'({fmt_decimal(x_eval)}) \\approx \\frac{{{fmt_decimal(y_der)} - {fmt_decimal(y_izq)}}}{{{fmt_decimal(x_der)} - {fmt_decimal(x_izq)}}} = {fmt_decimal(fp_aprox)}$$
 
-**Comparacion con la derivada exacta del interpolante:**
-- $P'({fmt_decimal(x_eval)}) = {fmt_decimal(fp_exacta)}$
-- Error absoluto: $|f'_{{\\text{{aprox}}}} - P'(x)| = {fmt_decimal(err_abs)}$
-- Error relativo: $\\dfrac{{|f'_{{\\text{{aprox}}}} - P'(x)|}}{{|P'(x)|}} \\cdot 100 = {fmt_decimal(err_rel)}\\%$
+{bloque_comparacion}
 
 **Conclusion.** {cierre}
 """
