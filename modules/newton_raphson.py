@@ -410,6 +410,131 @@ def _tabla_dataframe(res: ResultadoNR) -> pd.DataFrame:
 
 # --- Render principal ---
 
+def _render_estructura_examen(
+    f_expr: sp.Expr, fp_expr: sp.Expr, x_sym: sp.Symbol,
+    res: ResultadoNR, criterios: CriteriosDetencion, f_np,
+) -> None:
+    """Bloque 'paso a paso para escribir en la hoja del parcial'.
+
+    Replica la estructura tipica de la respuesta esperada:
+      0) Planteo + verificacion de Bolzano.
+      1) Calculo de f'(x).
+      2) Formula iterativa de Newton-Raphson.
+      3) Iteraciones (tabla resumen).
+      4) Criterio de detencion y conclusion.
+      5) Analisis comparativo (velocidad, precision, dificultad).
+    """
+    if not res.iteraciones:
+        return
+
+    with st.expander(
+        "📝 Estructura de respuesta para examen (formato alumno)",
+        expanded=False,
+    ):
+        st.markdown(
+            "Replica el orden del manuscrito de catedra. Para consignas tipo "
+            "*\"modele Newton-Raphson partiendo de x_0=..., pare al alcanzar tol\"*."
+        )
+
+        # ── 0) Planteo y Bolzano ────────────────────────────────────
+        st.markdown("##### 1) Planteo")
+        st.latex(rf"f(x) = {sp.latex(f_expr)}")
+        st.markdown(
+            f"Semilla $x_0 = {fmt_decimal(res.x0)}$, tolerancia "
+            f"$\\varepsilon = {criterios.tol_abs:.0e}$."
+        )
+
+        # Bolzano opcional sobre el rango cubierto por las iteraciones.
+        xs_used = [res.x0] + [it.x_next for it in res.iteraciones]
+        a_b, b_b = float(min(xs_used)), float(max(xs_used))
+        if a_b < b_b:
+            try:
+                fa, fb = float(f_np(a_b)), float(f_np(b_b))
+                signo = "< 0 ✓ Bolzano aplica" if fa * fb < 0 else "≥ 0 (no aplica)"
+                st.markdown(
+                    f"**Bolzano** en $[{fmt_decimal(a_b)}, {fmt_decimal(b_b)}]$: "
+                    f"$f({fmt_decimal(a_b)}) = {fmt_decimal(fa)}$, "
+                    f"$f({fmt_decimal(b_b)}) = {fmt_decimal(fb)}$ — "
+                    f"$f(a) \\cdot f(b) = {fmt_decimal(fa*fb)}$ {signo}."
+                )
+            except Exception:
+                pass
+
+        # ── 2) Formula y derivada ───────────────────────────────────
+        st.markdown("##### 2) Formula de Newton-Raphson y derivada")
+        st.latex(r"x_{n+1} = x_n - \dfrac{f(x_n)}{f'(x_n)}")
+        st.latex(rf"f'(x) = {sp.latex(fp_expr)}")
+
+        # ── 3) Evaluacion en x0 (paso de arranque, como en el manuscrito) ──
+        st.markdown("##### 3) Arranque — evaluacion en $x_0$")
+        try:
+            f_x0 = float(f_np(res.x0))
+            fp_x0 = float(fp_expr.subs(x_sym, res.x0).evalf())
+            st.markdown(
+                f"$f({fmt_decimal(res.x0)}) = {fmt_decimal(f_x0)}$  \n"
+                f"$f'({fmt_decimal(res.x0)}) = {fmt_decimal(fp_x0)}$  \n"
+                f"$x_1 = {fmt_decimal(res.x0)} - \\dfrac{{{fmt_decimal(f_x0)}}}"
+                f"{{{fmt_decimal(fp_x0)}}} = {fmt_decimal(res.iteraciones[0].x_next)}$"
+            )
+        except Exception:
+            pass
+
+        # ── 4) Tabla de iteraciones ─────────────────────────────────
+        st.markdown("##### 4) Iteraciones (formato manuscrito)")
+        n_show = min(8, len(res.iteraciones))
+        for k, it in enumerate(res.iteraciones[:n_show], start=1):
+            st.markdown(
+                f"$x_{{{k}}} = x_{{{k-1}}} - \\dfrac{{f(x_{{{k-1}}})}}"
+                f"{{f'(x_{{{k-1}}})}} = {fmt_decimal(it.x_next)}$"
+            )
+        if len(res.iteraciones) > n_show:
+            st.caption(f"... ({len(res.iteraciones) - n_show} iteraciones mas, ver tabla arriba)")
+
+        # ── 5) Criterio de detencion ────────────────────────────────
+        st.markdown("##### 5) Criterio de detencion alcanzado")
+        st.markdown(
+            f"- {res.motivo_corte}  \n"
+            f"- $|x_n - x_{{n-1}}|_{{final}} = "
+            f"{fmt_decimal(res.iteraciones[-1].error_abs)} "
+            f"\\le \\varepsilon = {criterios.tol_abs:.0e}$"
+        )
+        st.success(
+            f"$x^{{*}} \\approx {fmt_decimal(res.raiz)}$ — **Converge a la raiz** "
+            f"(verificacion: $|f(x^*)| = {fmt_decimal(abs(float(f_np(res.raiz))))}$)."
+        )
+
+        # ── 6) Analisis ─────────────────────────────────────────────
+        st.markdown("##### 6) Analisis comparativo (parte b: vs Steffensen-Aitken)")
+        errs = [it.error_abs for it in res.iteraciones
+                 if np.isfinite(it.error_abs) and it.error_abs > 1e-15]
+        orden_txt = ""
+        if len(errs) >= 4:
+            try:
+                slope, _ = np.polyfit(np.log(errs[:-1]), np.log(errs[1:]), 1)
+                orden_txt = (
+                    f"Orden empirico de convergencia: "
+                    f"$p \\approx {slope:.2f}$ "
+                    + ("(cuadratica → raiz simple)." if abs(slope - 2) < 0.3
+                       else "(lineal → raiz multiple)." if abs(slope - 1) < 0.3
+                       else f"(orden {slope:.2f}).")
+                )
+            except Exception:
+                pass
+        st.markdown(
+            "- **Velocidad**: Newton es de orden 2 (cuadratica) cuando la raiz "
+            "es simple — el numero de digitos correctos *se duplica* por iteracion. "
+            "Steffensen-Aitken acelera punto fijo a orden 2 tambien, pero requiere 3 "
+            "evaluaciones de g por paso.  \n"
+            "- **Precision**: con $\\varepsilon = 10^{-8}$, Newton suele cumplir en "
+            f"**{len(res.iteraciones)} iteraciones** (este caso). Punto fijo "
+            "lineal necesitaria muchas mas.  \n"
+            "- **Dificultad**: Newton requiere $f'(x)$ analitica y que "
+            "$f'(x_n) \\neq 0$. Steffensen-Aitken NO requiere derivada pero si "
+            "una $g(x)$ contractiva (Lipschitz $|g'| < 1$).  \n"
+            + (f"- {orden_txt}" if orden_txt else "")
+        )
+
+
 def render_newton_raphson() -> None:
     st.header("Metodo de Newton-Raphson")
     st.caption("x_{n+1} = x_n − f(x_n)/f'(x_n) — prof. Caceres, pg 15–16")
@@ -452,7 +577,7 @@ def render_newton_raphson() -> None:
         st.error(f"No se pudo derivar f(x) simbolicamente: {e}")
         return
 
-    st.latex(rf"f'(x) = {sp.latex(sp.simplify(fp_expr))}")
+    st.latex(rf"f'(x) = {sp.latex(fp_expr)}")
 
     col_x0, col_info2 = st.columns([1, 2])
     with col_x0:
@@ -580,12 +705,18 @@ def render_newton_raphson() -> None:
                                   titulo="Tabla de iteraciones",
                                   key_export="newton_raphson")
 
+        _render_estructura_examen(
+            f_expr=f_expr, fp_expr=fp_expr, x_sym=x_sym,
+            res=res, criterios=criterios,
+            f_np=f_np,
+        )
+
     with tab_pasos:
         n_pasos = st.slider("Iteraciones a explicar", 1,
                              min(10, len(res.iteraciones)),
                              value=min(3, len(res.iteraciones)), key="nr_np")
         render_pasos(_construir_pasos(res,
-                                        fp_latex=sp.latex(sp.simplify(fp_expr)),
+                                        fp_latex=sp.latex(fp_expr),
                                         n_pasos=n_pasos), titulo="")
 
     with tab_bolzano:

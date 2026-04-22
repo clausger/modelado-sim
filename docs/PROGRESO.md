@@ -4,6 +4,83 @@ Registro de avance sesion por sesion.
 
 ---
 
+## Sesion 4 — 2026-04-21
+
+### Objetivo
+Llevar el módulo Monte Carlo a calidad de parcial (consignas A-4, variante xe^y, B-4b, PE-3) sin apurar el cierre. Revisión cruzada con repo del amigo (TypeScript) y con el script oficial del profe (`MonteCarloSimulator.py` en tkinter + numpy).
+
+### Hallazgo crítico
+El profe usa `np.random.seed(0)` + `np.random.uniform` (línea 106-108 de su script). Nuestro código venía usando `random` de stdlib. Streams distintos → resultados no reproducibles contra la consigna. Se incorpora **selector de backend RNG** (numpy por defecto, stdlib opcional).
+
+### Trabajo realizado
+
+1. **`docs/MONTECARLO_REVISION.md` (nuevo)**
+   - Comparativa feature-by-feature: nuestro módulo vs repo del amigo (4 archivos TS).
+   - 4 consignas de parcial transcriptas textualmente (A-4, variante xe^y, B-4b, PE-3).
+   - Hallazgo RNG backend (numpy vs stdlib) y plan afinado de 7 tandas.
+
+2. **Selector backend RNG (tarea #5)**
+   - Nuevo helper `_rng_selector(key)` devuelve `(backend, Optional[int])` con 3 columnas: selectbox backend, checkbox "Fijar semilla", number_input semilla.
+   - `_seed_rng`, `_sample_uniform`, `_sample_uniform_2d` ahora aceptan `backend: RngBackend = "numpy"`.
+   - Semilla `0` deja de tratarse como "sin semilla" (el parcial pide literalmente `seed(0)`). None solo cuando el checkbox está off.
+   - Refactor de `_render_pasos_*` y `_run_rechazo_2d` para propagar backend y mostrar el call correcto (`np.random.seed(0)` vs `random.seed(0)`).
+
+3. **Bloque "Error ∝ 1/√N" (tarea #3)**
+   - Nuevo helper `_render_error_sqrt_n(sampler_fn, n_base, semilla_base, backend, ...)`.
+   - Tabla con 6 factores (N, 2N, 4N, 8N, 16N, 32N): estimación, σ (ddof=1), SE=σ/√N, ratio observado SE(kN)/SE(N), ratio esperado 1/√k.
+   - Gráfico log-log con curva teórica `c/√N` y puntos observados.
+   - Botón **"Demostrar: SE con N vs 4N"** que responde la pregunta del parcial B-4b (reducir error a la mitad requiere 4×, no 2×).
+   - Integrado como 4° tab en 1D, multidim, comparación de métodos y rechazo 2D.
+   - Límite de seguridad `_ERROR_SQRT_N_MAX = 2_000_000` por Nk.
+   - Smoke-test: ratios observados para x² en [0,1] → 0.7065/0.4967/0.3515 vs esperados 0.7071/0.5000/0.3536.
+
+4. **Tabla Bernoulli PE-3 (tarea #7)**
+   - En el preset π del muestreo por rechazo, nueva tabla de 10 lotes acumulados.
+   - Columnas: `i | N_i | k_i | p̂_i | π̂_i | p̂(1−p̂) | σ_p | SE_π = 4σ_p/√N | |π̂−π| | IC low | IC up`.
+   - Gráfico de convergencia de π̂ por lote con banda IC y línea horizontal de π real.
+   - Exactamente el reporte pedido por la consigna PE-3.
+
+5. **Verificación rechazo 2D con funciones que cruzan el eje (tarea #9)**
+   - El profe usa máscara mixta `((y≥0)&(y≤f)) | ((y≤0)&(y≥f))` para hit-or-miss de integración 1D.
+   - Nuestro rechazo 2D modo "curvas" con `min/max` sobre `(f, g)` ya cubre este caso: con `g(x)=0` calcula el área no signada `∫|f|dx`.
+   - Smoke-test: `f=sin(x), g=0, [0, 2π]` → 3.9964 ≈ 4 ✅.
+
+6. **Code review independiente**
+   - Agente `code-reviewer` revisó el helper y las 4 integraciones: 0 CRITICAL / 0 HIGH / 2 MEDIUM / 2 LOW → **APPROVE**.
+   - Nota aplicada: caption extra cuando `semilla=None` al pulsar el botón "reducir a la mitad".
+
+### Features del profe/amigo que todavía vale portar
+
+- **IC con t-Student** (profe usa `stats.t.ppf(0.5+conf/2, n-1)`) — relevante para N pequeño. Tarea #10.
+- **Gauss-Legendre** como valor de referencia cuando no hay primitiva cerrada (profe línea 117-119). Tarea #11.
+- **Valor exacto simbólico** para presets (`pi**2/6`, `(exp(2)-1)**2/exp(2)`). Tarea #8.
+- **Preset-buttons de parcial** con autollenado (A-4, xe^y, PE-3a, PE-3b). Tarea #6.
+- **Banda ±1σ acumulada** en gráfico de convergencia del profe.
+- **Scatter 2D/3D coloreado por f(x,y)** con colormap.
+
+### Estado de tareas Monte Carlo
+
+| # | Tarea | Estado |
+|---|-------|--------|
+| 1 | Explorar repo amigo | ✅ |
+| 2 | Comparativa nuestro vs amigo | ✅ |
+| 3 | Bloque error ∝ 1/√N | ✅ |
+| 5 | Backend RNG numpy/stdlib | ✅ |
+| 7 | Tabla Bernoulli en preset π | ✅ |
+| 9 | Rechazo 2D con f cruzando eje | ✅ (ya funcionaba) |
+| 8 | Valor exacto simbólico | ⏳ |
+| 6 | Presets de parcial | ⏳ (depende de #8) |
+| 4 | Revisión general rechazo 2D | ⏳ |
+| 10 | Opción t-Student | ⏳ |
+| 11 | Gauss-Legendre de referencia | ⏳ |
+
+### Próximos pasos
+- Cerrar #8 (valor exacto simbólico) → habilita #6.
+- Implementar #6 (preset-buttons con las 4 consignas verbatim).
+- Bajo demanda: #4, #10, #11.
+
+---
+
 ## Sesion 3 — 2026-04-17
 
 ### Objetivos

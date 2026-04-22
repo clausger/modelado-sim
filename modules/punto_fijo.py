@@ -287,6 +287,111 @@ def generar_reformulaciones(
     except Exception:
         pass
 
+    # Estrategia 4: invertir terminos trascendentes / radicales.
+    # Para cada termino t = func(u(x)) en f con func invertible, escribimos
+    #     func(u(x)) = -resto(x)
+    #     u(x) = func^{-1}(-resto(x))
+    # y resolvemos para x. Util para f = log(x-1)+cos(x-1) =>
+    #     log(x-1) = -cos(x-1) => x = exp(-cos(x-1)) + 1.
+    INVERSAS = {
+        sp.log: lambda y: sp.exp(y),
+        sp.exp: lambda y: sp.log(y),
+        sp.sin: lambda y: sp.asin(y),
+        sp.cos: lambda y: sp.acos(y),
+        sp.tan: lambda y: sp.atan(y),
+        sp.sinh: lambda y: sp.asinh(y),
+        sp.cosh: lambda y: sp.acosh(y),
+        sp.tanh: lambda y: sp.atanh(y),
+    }
+    try:
+        f_exp = sp.expand(f_expr)
+        terminos = list(f_exp.args) if isinstance(f_exp, sp.Add) else [f_exp]
+        for idx, t in enumerate(terminos):
+            if not t.has(x):
+                continue
+            # t puede venir con un coeficiente: c * func(arg)
+            coef, base = t.as_coeff_Mul()
+            func = type(base)
+            inv = INVERSAS.get(func)
+            if inv is None or len(base.args) != 1:
+                continue
+            arg = base.args[0]
+            if not arg.has(x):
+                continue
+            # Solo invertimos si arg(x) es lineal en x: arg = alpha*x + beta.
+            # En ese caso, x = (rhs - beta) / alpha, sin llamar a sp.solve
+            # (que falla con "multiple generators" cuando rhs depende de x).
+            try:
+                poly = sp.Poly(arg, x)
+                if poly.degree() != 1:
+                    continue
+                alpha = poly.nth(1)
+                beta = poly.nth(0)
+            except (sp.PolynomialError, Exception):
+                continue
+            try:
+                resto = sp.simplify(f_exp - t)
+                rhs = sp.simplify(inv(-resto / coef))  # arg = inv(-resto/coef)
+                sol = sp.simplify((rhs - beta) / alpha)
+                if not sol.has(x):
+                    # Reformulacion sin x en RHS no es punto fijo util.
+                    continue
+                nombre = rf"g_{{inv{idx}}}(x) = {sp.latex(sol)}"
+                pasos = [
+                    rf"f(x) = 0 \;\Rightarrow\; {sp.latex(t)} = -\left({sp.latex(resto)}\right)",
+                    rf"{sp.latex(arg)} = {func.__name__}^{{-1}}"
+                    rf"\!\left(-\dfrac{{{sp.latex(resto)}}}{{{sp.latex(coef)}}}\right) "
+                    rf"= {sp.latex(rhs)}",
+                    rf"x = {sp.latex(sol)} \;=\; g_{{inv{idx}}}(x)",
+                ]
+                meta = {
+                    "estrategia": "inversion",
+                    "titulo": f"Inversion del termino {sp.latex(t)} (aplicar {func.__name__}⁻¹)",
+                    "idea": (
+                        f"El termino ${sp.latex(t)}$ es invertible: aislamos "
+                        f"y aplicamos ${func.__name__}^{{-1}}$ a ambos lados. "
+                        "Estrategia clave para ecuaciones trascendentes "
+                        "(ej: log(x-1) + cos(x-1) = 0 → x = exp(-cos(x-1)) + 1)."
+                    ),
+                    "pasos_latex": pasos,
+                    "termino_invertido": sp.latex(t),
+                }
+                _agregar(nombre, sol, meta)
+            except (NotImplementedError, ValueError, ZeroDivisionError):
+                continue
+            except Exception:
+                continue
+    except Exception:
+        pass
+
+    # Estrategia 5: sympy.solve global (fallback). Funciona para polinomicas
+    # y algunas trascendentes simples; falla con NotImplementedError en
+    # ecuaciones con multiples generadores.
+    try:
+        soluciones = sp.solve(f_expr, x, dict=False)
+        for k, sol in enumerate(soluciones or []):
+            if not sol.has(x):
+                continue  # solucion cerrada, no g(x)
+            nombre = rf"g_{{solve{k}}}(x) = {sp.latex(sol)}"
+            meta = {
+                "estrategia": "solve",
+                "titulo": f"sympy.solve raiz {k+1}",
+                "idea": (
+                    "SymPy resolvio f(x)=0 simbolicamente para x. "
+                    "La forma resultante depende implicitamente de x → util "
+                    "como reformulacion de punto fijo."
+                ),
+                "pasos_latex": [
+                    rf"\text{{sympy.solve}}(f(x), x)[{k}]",
+                    rf"x = {sp.latex(sol)} \;=\; g_{{solve{k}}}(x)",
+                ],
+            }
+            _agregar(nombre, sol, meta)
+    except (NotImplementedError, ValueError):
+        pass
+    except Exception:
+        pass
+
     return candidatos
 
 
@@ -761,6 +866,95 @@ def _plot_aitken_vs_pf(res: ResultadoPuntoFijo) -> go.Figure:
 
 # --- Render principal ---
 
+def _render_estructura_alumno_steffensen(
+    g_expr: sp.Expr, gp_expr: sp.Expr, x_sym: sp.Symbol,
+    x0: float, res_steff: ResultadoSteffensen, g_np,
+) -> None:
+    """Bloque 'paso a paso al estilo del alumno en el examen' para Steffensen-Aitken.
+
+    Replica la estructura del manuscrito tipo:
+      1) Despeje (recordatorio manual).
+      2) g(x), g'(x).
+      3) Verificacion de Lipschitz: |g'(x_0)| < 1 → 'cumple criterio con esa semilla'.
+      4) Aplicacion ciclo-a-ciclo con valores numericos (semilla, x_1, x_2, x_0*).
+      5) Cierre: 'Converge a la raiz x*'.
+    """
+    if not res_steff or not res_steff.ciclos:
+        return
+
+    with st.expander("📝 Estructura de respuesta para examen (formato alumno)", expanded=False):
+        st.markdown(
+            "Imita el orden del manuscrito de catedra. Para parciales tipo "
+            "*\"use Steffensen-Aitken con condicion de Lipschitz\"*."
+        )
+
+        # 1) Despeje
+        st.markdown("##### 1) Planteo y despeje (a mano)")
+        st.markdown(
+            "Partiendo de $f(x) = 0$, se reformula como $x = g(x)$. "
+            "Anota el despeje algebraico en el examen, por ejemplo:  \n"
+            r"$\ln(x-1) = -\cos(x-1) \;\Rightarrow\; x-1 = e^{-\cos(x-1)} \;\Rightarrow\; "
+            r"g(x) = e^{-\cos(x-1)} + 1$"
+        )
+
+        # 2) g y g'
+        st.markdown("##### 2) g(x) y g'(x)")
+        st.latex(rf"g(x) = {sp.latex(g_expr)}")
+        st.latex(rf"g'(x) = {sp.latex(sp.simplify(gp_expr))}")
+
+        # 3) Verificacion de Lipschitz en x0
+        st.markdown("##### 3) Condicion de Lipschitz en la semilla")
+        try:
+            gp_x0 = float(sp.simplify(gp_expr).subs(x_sym, x0).evalf())
+            cumple = abs(gp_x0) < 1
+            st.latex(rf"g'({fmt_decimal(x0)}) = {fmt_decimal(gp_x0)}")
+            st.markdown(
+                f"$|g'({fmt_decimal(x0)})| = {fmt_decimal(abs(gp_x0))} "
+                + ("< 1$ ✓" if cumple else "\\ge 1$ ✗")
+            )
+            if cumple:
+                st.success(
+                    f"**Cumple criterio de convergencia con la semilla $x_0 = {fmt_decimal(x0)}$.**"
+                )
+            else:
+                st.warning(
+                    f"$|g'(x_0)| \\ge 1$: la condicion local de Lipschitz NO se "
+                    "cumple. Probar otra semilla o reformular $g$."
+                )
+        except Exception as e:
+            st.caption(f"(no pude evaluar g'(x₀) automaticamente: {e})")
+
+        # 4) Aplicacion ciclo a ciclo
+        st.markdown("##### 4) Aplicacion del algoritmo de Steffensen-Aitken")
+        st.latex(
+            r"x_0^{*} = x_0 - \dfrac{(x_1 - x_0)^2}{x_2 - 2 x_1 + x_0}, "
+            r"\quad \text{con } x_1 = g(x_0),\; x_2 = g(x_1)"
+        )
+        n_show = min(4, len(res_steff.ciclos))
+        for k, c in enumerate(res_steff.ciclos[:n_show], start=1):
+            st.markdown(
+                f"**Ciclo {k}** — semilla $x_0 = {fmt_decimal(c.x_n)}$:  \n"
+                f"&nbsp;&nbsp;$x_1 = g(x_0) = {fmt_decimal(c.x_n1)}$  \n"
+                f"&nbsp;&nbsp;$x_2 = g(x_1) = {fmt_decimal(c.x_n2)}$  \n"
+                f"&nbsp;&nbsp;$x_0^{{*}} = {fmt_decimal(c.x_star)}$ "
+                f"(error $|x_0^{{*}} - x_0| = {fmt_decimal(c.error_abs)}$)"
+            )
+        if len(res_steff.ciclos) > n_show:
+            st.caption(f"... ({len(res_steff.ciclos) - n_show} ciclos mas, ver tabla arriba)")
+
+        # 5) Cierre
+        st.markdown("##### 5) Conclusion")
+        try:
+            f_raiz = float(g_np(res_steff.raiz)) - res_steff.raiz
+        except Exception:
+            f_raiz = float("nan")
+        st.success(
+            f"$x^{{*}} \\approx {fmt_decimal(res_steff.raiz)}$ — "
+            f"**Converge a la raiz** "
+            f"(verificacion: $|g(x^*) - x^*| = {fmt_decimal(abs(f_raiz))}$)."
+        )
+
+
 def render_punto_fijo() -> None:
     st.header("Metodo del Punto Fijo")
     st.caption("Iteracion x_{n+1} = g(x_n) — prof. Caceres, pg 11–12")
@@ -1163,6 +1357,11 @@ cuadratica sin calcular derivadas (no necesita $f'$ como Newton). Pedagogicament
 es el puente natural entre PF y Newton.
                     """
                 )
+
+            _render_estructura_alumno_steffensen(
+                g_expr=g_expr, gp_expr=analisis["gp_expr"], x_sym=x_sym,
+                x0=x0, res_steff=res_steff, g_np=g_np,
+            )
         else:
             df = _tabla_dataframe(res)
             resaltar = resaltar_tolerancia("E_abs", criterios.tol_abs) if criterios.usar_abs else None

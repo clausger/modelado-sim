@@ -617,11 +617,29 @@ def render_biseccion() -> None:
     )
 
     # --- Pre-checks ---
+    import math
     try:
         fa = float(f_np(a))
         fb = float(f_np(b))
     except Exception as e:
-        st.error(f"Error al evaluar f en los extremos: {e}")
+        st.error(
+            f"Error al evaluar f en los extremos: {e}.  \n"
+            "Probá con un intervalo donde f este definida (ej: para "
+            "ln(x-1), tomar a > 1)."
+        )
+        return
+
+    if not math.isfinite(fa):
+        st.error(
+            f"**f no esta definida en x = {a}**: f({a}) = {fa}.  \n"
+            "Ajustar el extremo izquierdo (ej: para ln(x-1), usar a > 1)."
+        )
+        return
+    if not math.isfinite(fb):
+        st.error(
+            f"**f no esta definida en x = {b}**: f({b}) = {fb}.  \n"
+            "Ajustar el extremo derecho."
+        )
         return
 
     col_fa, col_fb, col_prod = st.columns(3)

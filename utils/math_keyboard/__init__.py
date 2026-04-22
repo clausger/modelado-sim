@@ -161,6 +161,19 @@ def parse_latex(
             )
             return None, None
 
+    # Workaround: latex2sympy2 traduce \log como log(x, 10) (base 10).
+    # SymPy lambdify mapea log(x, base) → numpy.log(x, base), pero numpy.log
+    # es un ufunc cuyo 2do arg es 'out' (array), no la base — eso lanza
+    # "return arrays must be of ArrayType" al evaluar.
+    # Reescribimos log(x, b) → log(x)/log(b) para que lambdify funcione.
+    try:
+        expr = expr.replace(
+            lambda e: isinstance(e, sp.log) and len(e.args) == 2,
+            lambda e: sp.log(e.args[0]) / sp.log(e.args[1]),
+        )
+    except Exception:
+        pass
+
     try:
         f_np = sp.lambdify(variables, expr, modules=["numpy"])
         return expr, f_np

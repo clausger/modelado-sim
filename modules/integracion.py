@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
@@ -78,6 +80,554 @@ def _simpson38(f_np, a: float, b: float, n: int):
     contribuciones = (3.0 * h / 8.0) * pesos * f_vals
     resultado = float(np.sum(contribuciones))
     return resultado, x_vals, f_vals, pesos, contribuciones, h
+
+
+# ---------------------------------------------------------------------------
+# Funcion segura con L'Hopital automatico en extremos/puntos problematicos
+# ---------------------------------------------------------------------------
+
+def _fmt_tex(v: float, n_dec: int = 6) -> str:
+    """Formato limpio para LaTeX: entero si es entero, sino n_dec decimales."""
+    if not np.isfinite(v):
+        return str(v)
+    if abs(v - round(v)) < 1e-12:
+        return str(int(round(v)))
+    return f"{v:.{n_dec}f}"
+
+
+def _tex(expr: sp.Expr) -> str:
+    """sp.latex con notacion 'ln' (como escribe el profe) en vez de 'log'."""
+    return sp.latex(expr, ln_notation=True)
+
+
+def _explicar_lhopital(expr: sp.Expr, x_sym: sp.Symbol, x0: float) -> dict | None:
+    """Si expr = num/den con num(x0)=den(x0)=0, devuelve info del paso L'Hopital."""
+    try:
+        frac = sp.together(expr)
+        num, den = sp.fraction(frac)
+        if den == 1:
+            return None
+        num_val = sp.limit(num, x_sym, x0)
+        den_val = sp.limit(den, x_sym, x0)
+        if num_val == 0 and den_val == 0:
+            num_p = sp.diff(num, x_sym)
+            den_p = sp.diff(den, x_sym)
+            ratio = num_p / den_p
+            limite = sp.limit(ratio, x_sym, x0)
+            val = float(limite.evalf())
+            if np.isfinite(val):
+                return {
+                    "num": num,
+                    "den": den,
+                    "num_p": num_p,
+                    "den_p": den_p,
+                    "ratio": sp.simplify(ratio),
+                    "limite": val,
+                }
+    except Exception:
+        pass
+    return None
+
+
+class _FuncionSegura:
+    """Wrapper sobre sp.lambdify que detecta NaN/Inf y aplica limite simbolico.
+
+    Uso:
+        f = _FuncionSegura(expr, x_sym)
+        f.registrar_extremos(a, b)   # pre-evalua para detectar 0/0 en a, b
+        # luego f(x_array) funciona como una funcion numpy normal
+    """
+
+    def __init__(self, expr: sp.Expr, x_sym: sp.Symbol) -> None:
+        self.expr = expr
+        self.x_sym = x_sym
+        self._raw = sp.lambdify(x_sym, expr, modules=["numpy"])
+        self._cache: dict[float, float] = {}
+        self.avisos: list[tuple[float, float, dict | None]] = []
+
+    def _intentar_limite(self, x_val: float) -> float | None:
+        for xc, vc in self._cache.items():
+            if abs(x_val - xc) < 1e-12:
+                return vc
+        try:
+            val = float(sp.limit(self.expr, self.x_sym, x_val).evalf())
+            if np.isfinite(val):
+                self._cache[x_val] = val
+                return val
+        except Exception:
+            pass
+        return None
+
+    def registrar_extremos(self, a: float, b: float) -> None:
+        for x_val in (a, b):
+            try:
+                with np.errstate(invalid="ignore", divide="ignore", over="ignore"):
+                    y_raw = self._raw(np.float64(x_val))
+                y_float = float(np.asarray(y_raw, dtype=float))
+                if np.isfinite(y_float):
+                    continue
+            except Exception:
+                pass
+            val = self._intentar_limite(x_val)
+            if val is not None:
+                info = _explicar_lhopital(self.expr, self.x_sym, x_val)
+                if not any(abs(x_val - x0) < 1e-12 for (x0, _, _) in self.avisos):
+                    self.avisos.append((x_val, val, info))
+
+    def __call__(self, x):
+        escalar = np.isscalar(x) or np.ndim(x) == 0
+        x_arr = np.atleast_1d(np.asarray(x, dtype=float))
+        with np.errstate(invalid="ignore", divide="ignore", over="ignore"):
+            raw = self._raw(x_arr)
+            y = np.asarray(raw, dtype=float)
+            if y.shape != x_arr.shape:
+                y = np.broadcast_to(y, x_arr.shape).astype(float).copy()
+            else:
+                y = y.astype(float, copy=True)
+
+        mask_bad = ~np.isfinite(y)
+        if mask_bad.any():
+            for i in np.where(mask_bad)[0]:
+                val = self._intentar_limite(float(x_arr[i]))
+                if val is not None:
+                    y[i] = val
+
+        if escalar:
+            return float(y[0])
+        return y
+
+
+def _mostrar_avisos_lhopital(f_segura: _FuncionSegura) -> None:
+    if not f_segura.avisos:
+        return
+    for (x0, limite, info) in f_segura.avisos:
+        x0_tex = _fmt_tex(x0)
+        with st.expander(
+            f"⚠️ Indeterminacion 0/0 detectada en x = {x0_tex} — L'Hopital aplicado",
+            expanded=True,
+        ):
+            if info is not None:
+                st.markdown(
+                    "El integrando presenta una **indeterminacion 0/0** en "
+                    f"x = {x0_tex}. Se aplica regla de **L'Hopital** para obtener "
+                    "el valor limite usado en la cuadratura:"
+                )
+                st.latex(
+                    rf"\lim_{{x\to {x0_tex}}} "
+                    rf"\frac{{{_tex(info['num'])}}}{{{_tex(info['den'])}}}"
+                    rf" = \frac{{0}}{{0}} \;\Rightarrow\; "
+                    rf"\lim_{{x\to {x0_tex}}} "
+                    rf"\frac{{{_tex(info['num_p'])}}}{{{_tex(info['den_p'])}}}"
+                )
+                st.latex(
+                    rf"f({x0_tex}) = {_tex(info['ratio'])}\Bigg|_{{x={x0_tex}}}"
+                    rf" = {_fmt_tex(info['limite'])}"
+                )
+            else:
+                st.info(
+                    f"Valor limite aplicado en x = {x0_tex}: "
+                    f"{_fmt_tex(limite)}"
+                )
+
+
+# ---------------------------------------------------------------------------
+# Errores de truncamiento (simbolico, con xi configurable)
+# ---------------------------------------------------------------------------
+
+_ERROR_META = {
+    "rectangulo": {
+        "orden_deriv": 2,
+        "label_deriv": "f''",
+        "signo": +1,
+        "const": lambda a, b, n: (b - a) ** 3 / (24.0 * n ** 2),
+        "formula": r"E_R = \frac{(b-a)^3}{24\,n^2}\,f''(\xi)",
+        "nombre": "E_R",
+        "denom_tex": lambda n: rf"24 \cdot {n}^2",
+        "exp_ba": 3,
+        "signo_tex": "",
+    },
+    "trapecio": {
+        "orden_deriv": 2,
+        "label_deriv": "f''",
+        "signo": -1,
+        "const": lambda a, b, n: -((b - a) ** 3) / (12.0 * n ** 2),
+        "formula": r"E_T = -\frac{(b-a)^3}{12\,n^2}\,f''(\xi)",
+        "nombre": "E_T",
+        "denom_tex": lambda n: rf"12 \cdot {n}^2",
+        "exp_ba": 3,
+        "signo_tex": "-",
+    },
+    "simpson13": {
+        "orden_deriv": 4,
+        "label_deriv": "f^{(4)}",
+        "signo": -1,
+        "const": lambda a, b, n: -((b - a) ** 5) / (180.0 * n ** 4),
+        "formula": r"E_S = -\frac{(b-a)^5}{180\,n^4}\,f^{(4)}(\xi)",
+        "nombre": "E_S",
+        "denom_tex": lambda n: rf"180 \cdot {n}^4",
+        "exp_ba": 5,
+        "signo_tex": "-",
+    },
+    "simpson38": {
+        "orden_deriv": 4,
+        "label_deriv": "f^{(4)}",
+        "signo": -1,
+        "const": lambda a, b, n: -((b - a) ** 5) / (6480.0 * n ** 4),
+        "formula": r"E_{3/8} = -\frac{(b-a)^5}{6480\,n^4}\,f^{(4)}(\xi)",
+        "nombre": "E_{3/8}",
+        "denom_tex": lambda n: rf"6480 \cdot {n}^4",
+        "exp_ba": 5,
+        "signo_tex": "-",
+    },
+}
+
+
+def _calcular_error_trunc(metodo: str, expr: sp.Expr, x_sym: sp.Symbol,
+                          a: float, b: float, n: int, xi: float) -> dict:
+    meta = _ERROR_META[metodo]
+    deriv = sp.diff(expr, x_sym, meta["orden_deriv"])
+    deriv_xi_sym = deriv.subs(x_sym, xi)
+    deriv_xi = float(sp.N(deriv_xi_sym))
+    E = meta["const"](a, b, n) * deriv_xi
+    return {
+        "meta": meta,
+        "deriv_expr": sp.simplify(deriv),
+        "deriv_xi_sym": deriv_xi_sym,
+        "deriv_xi": deriv_xi,
+        "E": E,
+    }
+
+
+def _mostrar_error_trunc(metodo: str, expr: sp.Expr, x_sym: sp.Symbol,
+                         a: float, b: float, n: int, xi: float,
+                         n_dec: int) -> dict:
+    info = _calcular_error_trunc(metodo, expr, x_sym, a, b, n, xi)
+    meta = info["meta"]
+    etiq = meta["label_deriv"]
+    a_tex, b_tex, xi_tex = _fmt_tex(a), _fmt_tex(b), _fmt_tex(xi)
+
+    st.markdown("**Formula del error de truncamiento:**")
+    st.latex(meta["formula"])
+
+    st.markdown(f"**Derivada simbolica $ {etiq}(x) $:**")
+    st.latex(rf"{etiq}(x) = {_tex(info['deriv_expr'])}")
+
+    st.markdown(rf"**Evaluada en $ \xi = {xi_tex} $:**")
+    st.latex(rf"{etiq}({xi_tex}) = {_fmt_tex(info['deriv_xi'], n_dec)}")
+
+    st.markdown("**Sustitucion numerica:**")
+    deriv_val_tex = _fmt_tex(info["deriv_xi"], n_dec)
+    st.latex(
+        rf"{meta['nombre']} = {meta['signo_tex']}"
+        rf"\frac{{({b_tex}-{a_tex})^{meta['exp_ba']}}}{{{meta['denom_tex'](n)}}}"
+        rf" \cdot ({deriv_val_tex})"
+    )
+    # Resultado: tambien formato cientifico si es muy chico
+    E = info["E"]
+    if abs(E) != 0 and abs(E) < 1e-4:
+        E_tex = f"{E:.6e}"
+    else:
+        E_tex = _fmt_tex(E, n_dec)
+    st.latex(rf"{meta['nombre']} = {E_tex}")
+    return info
+
+
+# ---------------------------------------------------------------------------
+# Paso a paso estilo examen (sustitucion numerica en formulas oficiales)
+# ---------------------------------------------------------------------------
+
+def _paso_trapecio_examen(a: float, b: float, n: int, h: float,
+                          f_vals: np.ndarray, resultado: float, n_dec: int) -> None:
+    st.markdown("#### Paso a paso (formato examen)")
+    st.latex(
+        r"I \approx \frac{h}{2}\Bigl[f(x_0) + "
+        r"2\sum_{i=1}^{n-1}f(x_i) + f(x_n)\Bigr]"
+    )
+    f_str = [_fmt_tex(v, n_dec) for v in f_vals]
+    h_tex = _fmt_tex(h)
+    if n > 1:
+        internos = " + ".join(f_str[1:-1])
+        st.latex(
+            rf"I \approx \frac{{{h_tex}}}{{2}}\bigl["
+            rf"{f_str[0]} + 2({internos}) + {f_str[-1]}\bigr]"
+        )
+    else:
+        st.latex(
+            rf"I \approx \frac{{{h_tex}}}{{2}}\bigl["
+            rf"{f_str[0]} + {f_str[-1]}\bigr]"
+        )
+    suma_int = 2.0 * float(np.sum(f_vals[1:-1])) if n > 1 else 0.0
+    bracket = float(f_vals[0]) + suma_int + float(f_vals[-1])
+    st.latex(
+        rf"I \approx \frac{{{h_tex}}}{{2}} \cdot {_fmt_tex(bracket, n_dec)}"
+        rf" = {_fmt_tex(resultado, n_dec)}"
+    )
+
+
+def _paso_simpson13_examen(a: float, b: float, n: int, h: float,
+                           f_vals: np.ndarray, resultado: float, n_dec: int) -> None:
+    st.markdown("#### Paso a paso (formato examen)")
+    st.latex(
+        r"I \approx \frac{h}{3}\Bigl[f(x_0) + "
+        r"4\sum_{i\,\text{impar}}f(x_i) + "
+        r"2\sum_{i\,\text{par}}f(x_i) + f(x_n)\Bigr]"
+    )
+    f_str = [_fmt_tex(v, n_dec) for v in f_vals]
+    h_tex = _fmt_tex(h)
+    impares = [f_str[i] for i in range(1, n, 2)]
+    pares = [f_str[i] for i in range(2, n, 2)]
+    imp_tex = " + ".join(impares) if impares else "0"
+    if pares:
+        par_tex = " + ".join(pares)
+        st.latex(
+            rf"I \approx \frac{{{h_tex}}}{{3}}\bigl["
+            rf"{f_str[0]} + 4({imp_tex}) + 2({par_tex}) + {f_str[-1]}\bigr]"
+        )
+    else:
+        st.latex(
+            rf"I \approx \frac{{{h_tex}}}{{3}}\bigl["
+            rf"{f_str[0]} + 4({imp_tex}) + {f_str[-1]}\bigr]"
+        )
+    s_imp = 4.0 * float(sum(f_vals[i] for i in range(1, n, 2)))
+    s_par = 2.0 * float(sum(f_vals[i] for i in range(2, n, 2))) if pares else 0.0
+    bracket = float(f_vals[0]) + s_imp + s_par + float(f_vals[-1])
+    st.latex(
+        rf"I \approx \frac{{{h_tex}}}{{3}} \cdot {_fmt_tex(bracket, n_dec)}"
+        rf" = {_fmt_tex(resultado, n_dec)}"
+    )
+
+
+def _paso_simpson38_examen(a: float, b: float, n: int, h: float,
+                           f_vals: np.ndarray, resultado: float, n_dec: int) -> None:
+    st.markdown("#### Paso a paso (formato examen)")
+    st.latex(
+        r"I \approx \frac{3h}{8}\Bigl[f(x_0) + "
+        r"3\sum_{i\,\text{no mult. 3}}f(x_i) + "
+        r"2\sum_{i\,\text{mult. 3}}f(x_i) + f(x_n)\Bigr]"
+    )
+    f_str = [_fmt_tex(v, n_dec) for v in f_vals]
+    h_tex = _fmt_tex(h)
+    tres = [f_str[i] for i in range(1, n) if i % 3 != 0]
+    dos = [f_str[i] for i in range(3, n, 3)]
+    tres_tex = " + ".join(tres) if tres else "0"
+    if dos:
+        dos_tex = " + ".join(dos)
+        st.latex(
+            rf"I \approx \frac{{3 \cdot {h_tex}}}{{8}}\bigl["
+            rf"{f_str[0]} + 3({tres_tex}) + 2({dos_tex}) + {f_str[-1]}\bigr]"
+        )
+    else:
+        st.latex(
+            rf"I \approx \frac{{3 \cdot {h_tex}}}{{8}}\bigl["
+            rf"{f_str[0]} + 3({tres_tex}) + {f_str[-1]}\bigr]"
+        )
+    s_tres = 3.0 * float(sum(f_vals[i] for i in range(1, n) if i % 3 != 0))
+    s_dos = 2.0 * float(sum(f_vals[i] for i in range(3, n, 3))) if dos else 0.0
+    bracket = float(f_vals[0]) + s_tres + s_dos + float(f_vals[-1])
+    st.latex(
+        rf"I \approx \frac{{3 \cdot {h_tex}}}{{8}} \cdot {_fmt_tex(bracket, n_dec)}"
+        rf" = {_fmt_tex(resultado, n_dec)}"
+    )
+
+
+def _respuesta_examen_integracion(
+    metodo: str,
+    expr: sp.Expr,
+    x_sym: sp.Symbol,
+    a: float,
+    b: float,
+    n: int,
+    h: float,
+    x_vals: np.ndarray,
+    f_vals: np.ndarray,
+    resultado: float,
+    xi: float,
+    n_dec: int,
+    f_segura: _FuncionSegura,
+    valor_exacto: float | None,
+) -> str:
+    """Genera el bloque markdown completo estilo examen/alumno para un metodo."""
+    f_latex = _tex(expr)
+    a_tex, b_tex = _fmt_tex(a), _fmt_tex(b)
+    n_dec_tabla = min(n_dec, 6)
+
+    bloque: list[str] = []
+
+    # 1. Planteo
+    bloque.append("**Planteo.**")
+    bloque.append(rf"$$I = \int_{{{a_tex}}}^{{{b_tex}}} {f_latex}\, dx$$")
+    bloque.append(rf"$f(x) = {f_latex}$")
+    if valor_exacto is not None:
+        bloque.append(f"**Valor exacto (SymPy):** $A = {_fmt_tex(valor_exacto, 10)}$")
+    bloque.append("")
+
+    # 2. L'Hopital si hubo
+    if f_segura.avisos:
+        bloque.append("**Evaluación en los extremos — indeterminación 0/0.**")
+        for (x0, limite, info) in f_segura.avisos:
+            x0_tex = _fmt_tex(x0)
+            if info is not None:
+                bloque.append(
+                    rf"$$f({x0_tex}) = "
+                    rf"\frac{{{_tex(info['num'])}}}{{{_tex(info['den'])}}}"
+                    rf"\Bigg|_{{x={x0_tex}}} = \frac{{0}}{{0}} "
+                    rf"\;\Rightarrow\; \text{{L'Hôpital}}$$"
+                )
+                bloque.append(
+                    rf"$$\lim_{{x\to {x0_tex}}} "
+                    rf"\frac{{{_tex(info['num_p'])}}}{{{_tex(info['den_p'])}}}"
+                    rf" = {_tex(info['ratio'])}\Bigg|_{{x={x0_tex}}}"
+                    rf" = {_fmt_tex(limite, n_dec_tabla)}$$"
+                )
+            else:
+                bloque.append(
+                    f"$f({x0_tex}) = {_fmt_tex(limite, n_dec_tabla)}$ "
+                    "_(límite aplicado)_"
+                )
+        bloque.append("")
+
+    # 3. Tabla i | x_i | f(x_i)
+    bloque.append(
+        f"**Tabla de puntos** ($n = {n}$, $h = {_fmt_tex(h, n_dec_tabla)}$):"
+    )
+    bloque.append("")
+    bloque.append("| i | $x_i$ | $f(x_i)$ |")
+    bloque.append("|---|---|---|")
+    for i in range(len(x_vals)):
+        bloque.append(
+            f"| {i} | ${_fmt_tex(float(x_vals[i]), n_dec_tabla)}$ | "
+            f"${_fmt_tex(float(f_vals[i]), n_dec_tabla)}$ |"
+        )
+    bloque.append("")
+
+    # 4. Aplicacion del metodo
+    f_str = [_fmt_tex(float(v), n_dec_tabla) for v in f_vals]
+    h_tex = _fmt_tex(h, n_dec_tabla)
+
+    if metodo == "trapecio":
+        bloque.append(f"**Aplicación — Trapecio compuesto ($n = {n}$):**")
+        bloque.append(
+            r"$$I \approx \frac{h}{2}\Bigl[f(x_0) + "
+            r"2\sum_{i=1}^{n-1} f(x_i) + f(x_n)\Bigr]$$"
+        )
+        if n > 1:
+            internos = " + ".join(f_str[1:-1])
+            bloque.append(
+                rf"$$I \approx \frac{{{h_tex}}}{{2}}\bigl["
+                rf"{f_str[0]} + 2({internos}) + {f_str[-1]}\bigr]$$"
+            )
+        else:
+            bloque.append(
+                rf"$$I \approx \frac{{{h_tex}}}{{2}}\bigl["
+                rf"{f_str[0]} + {f_str[-1]}\bigr]$$"
+            )
+        bloque.append(rf"$$I \approx {_fmt_tex(resultado, n_dec)}$$")
+    elif metodo == "simpson13":
+        bloque.append(f"**Aplicación — Simpson 1/3 compuesto ($n = {n}$):**")
+        bloque.append(
+            r"$$I \approx \frac{h}{3}\Bigl[f(x_0) + "
+            r"4\!\!\sum_{i\,\text{impar}}\!\! f(x_i) + "
+            r"2\!\!\sum_{i\,\text{par}}\!\! f(x_i) + f(x_n)\Bigr]$$"
+        )
+        impares = [f_str[i] for i in range(1, n, 2)]
+        pares = [f_str[i] for i in range(2, n, 2)]
+        imp_tex = " + ".join(impares) if impares else "0"
+        if pares:
+            par_tex = " + ".join(pares)
+            bloque.append(
+                rf"$$I \approx \frac{{{h_tex}}}{{3}}\bigl["
+                rf"{f_str[0]} + 4({imp_tex}) + 2({par_tex}) + {f_str[-1]}\bigr]$$"
+            )
+        else:
+            bloque.append(
+                rf"$$I \approx \frac{{{h_tex}}}{{3}}\bigl["
+                rf"{f_str[0]} + 4({imp_tex}) + {f_str[-1]}\bigr]$$"
+            )
+        bloque.append(rf"$$I \approx {_fmt_tex(resultado, n_dec)}$$")
+    elif metodo == "simpson38":
+        bloque.append(f"**Aplicación — Simpson 3/8 compuesto ($n = {n}$):**")
+        bloque.append(
+            r"$$I \approx \frac{3h}{8}\Bigl[f(x_0) + "
+            r"3\!\!\sum_{i\,\text{no mult.3}}\!\! f(x_i) + "
+            r"2\!\!\sum_{i\,\text{mult.3}}\!\! f(x_i) + f(x_n)\Bigr]$$"
+        )
+        tres = [f_str[i] for i in range(1, n) if i % 3 != 0]
+        dos = [f_str[i] for i in range(3, n, 3)]
+        tres_tex = " + ".join(tres) if tres else "0"
+        if dos:
+            dos_tex = " + ".join(dos)
+            bloque.append(
+                rf"$$I \approx \frac{{3 \cdot {h_tex}}}{{8}}\bigl["
+                rf"{f_str[0]} + 3({tres_tex}) + 2({dos_tex}) + {f_str[-1]}\bigr]$$"
+            )
+        else:
+            bloque.append(
+                rf"$$I \approx \frac{{3 \cdot {h_tex}}}{{8}}\bigl["
+                rf"{f_str[0]} + 3({tres_tex}) + {f_str[-1]}\bigr]$$"
+            )
+        bloque.append(rf"$$I \approx {_fmt_tex(resultado, n_dec)}$$")
+    elif metodo == "rectangulo":
+        bloque.append(f"**Aplicación — Rectángulo (punto medio, $n = {n}$):**")
+        bloque.append(
+            r"$$I \approx h\sum_{i=0}^{n-1} "
+            r"f\!\left(a + \left(i+\tfrac{1}{2}\right)h\right)$$"
+        )
+        suma_tex = " + ".join(f_str)
+        bloque.append(rf"$$I \approx {h_tex} \cdot ({suma_tex})$$")
+        bloque.append(rf"$$I \approx {_fmt_tex(resultado, n_dec)}$$")
+
+    bloque.append("")
+
+    # 5. Error de truncamiento
+    info_err = _calcular_error_trunc(metodo, expr, x_sym, a, b, n, xi)
+    meta = info_err["meta"]
+    etiq = meta["label_deriv"]
+    xi_tex = _fmt_tex(xi)
+    deriv_val_tex = _fmt_tex(info_err["deriv_xi"], n_dec)
+    E = info_err["E"]
+    if abs(E) != 0 and abs(E) < 1e-4:
+        E_tex = f"{E:.6e}"
+    else:
+        E_tex = _fmt_tex(E, n_dec)
+
+    bloque.append(rf"**Error de truncamiento ($\xi = {xi_tex}$):**")
+    bloque.append(rf"$$ {meta['formula']} $$")
+    bloque.append(rf"$$ {etiq}(x) = {_tex(info_err['deriv_expr'])} $$")
+    bloque.append(rf"$$ {etiq}({xi_tex}) = {deriv_val_tex} $$")
+    bloque.append(
+        rf"$$ {meta['nombre']} = {meta['signo_tex']}"
+        rf"\frac{{({b_tex}-{a_tex})^{meta['exp_ba']}}}"
+        rf"{{{meta['denom_tex'](n)}}}"
+        rf" \cdot ({deriv_val_tex}) = {E_tex} $$"
+    )
+
+    # 6. Error real (si hay valor exacto)
+    if valor_exacto is not None:
+        err_real = abs(valor_exacto - resultado)
+        bloque.append("")
+        bloque.append(
+            "**Error real** (contra valor exacto de SymPy): "
+            rf"$|A - I| = {_fmt_tex(err_real, n_dec)}$"
+        )
+
+    return "\n".join(bloque)
+
+
+def _paso_rectangulo_examen(a: float, b: float, n: int, h: float,
+                            f_mid: np.ndarray, resultado: float, n_dec: int) -> None:
+    st.markdown("#### Paso a paso (formato examen)")
+    st.latex(
+        r"I \approx h\sum_{i=0}^{n-1}f\!\left(a+\left(i+\tfrac{1}{2}\right)h\right)"
+    )
+    f_str = [_fmt_tex(v, n_dec) for v in f_mid]
+    h_tex = _fmt_tex(h)
+    suma_tex = " + ".join(f_str)
+    st.latex(rf"I \approx {h_tex} \cdot ({suma_tex})")
+    suma = float(np.sum(f_mid))
+    st.latex(
+        rf"I \approx {h_tex} \cdot {_fmt_tex(suma, n_dec)}"
+        rf" = {_fmt_tex(resultado, n_dec)}"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -178,7 +728,7 @@ def _plot_simpson(f_np, a: float, b: float, n: int, resultado: float, nombre: st
 # Inputs / outputs compartidos
 # ---------------------------------------------------------------------------
 
-def _inputs_comunes(key_prefix: str):
+def _inputs_comunes(key_prefix: str, con_xi: bool = False):
     latex = math_input(
         label="f(x) =",
         default_latex="x^{2}+\\sin(x)",
@@ -197,7 +747,18 @@ def _inputs_comunes(key_prefix: str):
                           key=f"{key_prefix}_tol")
     tolerancia = 10 ** (-n_dec)
     st.latex(rf"\text{{Tolerancia}} = 10^{{-{n_dec}}}")
-    return latex, a_str, b_str, int(n), n_dec, tolerancia
+
+    xi_str = ""
+    if con_xi:
+        xi_str = st.text_input(
+            "ξ para error de truncamiento (opcional)",
+            value="",
+            placeholder="vacio = punto medio (a+b)/2",
+            key=f"{key_prefix}_xi",
+            help="Punto donde se evalua la derivada en la formula del error. "
+                 "Acepta expresiones: 0.5, pi/4, (a+b)/2, etc.",
+        )
+    return latex, a_str, b_str, int(n), n_dec, tolerancia, xi_str
 
 
 def _mostrar_resultados(resultado: float, valor_exacto, n_dec: int,
@@ -293,25 +854,48 @@ def _metodo_rectangulo():
         """)
         st.latex(r"\int_a^b f(x)\,dx \approx h\sum_{i=0}^{n-1} f\!\left(a + \left(i+\tfrac{1}{2}\right)h\right)")
         st.markdown("**Error de truncamiento:**")
-        st.latex(r"E = \frac{(b-a)^3}{24\,n^2}\,f''(\xi)")
+        st.latex(r"E_R = \frac{(b-a)^3}{24\,n^2}\,f''(\xi)")
         st.markdown("**Restriccion de n:** Ninguna.")
 
-    latex, a_str, b_str, n, n_dec, tol = _inputs_comunes("rect")
+    latex, a_str, b_str, n, n_dec, tol, xi_str = _inputs_comunes("rect", con_xi=True)
 
     if st.button("Calcular", key="rect_calc"):
         x_sym = sp.Symbol("x")
-        expr, f_np = parse_latex(latex, [x_sym])
+        expr, _ = parse_latex(latex, [x_sym])
         if expr is None:
             return
         a = parse_expr_to_float(a_str, "a")
         b = parse_expr_to_float(b_str, "b")
         if a is None or b is None:
             return
+
+        f_segura = _FuncionSegura(expr, x_sym)
+        f_segura.registrar_extremos(a, b)
+        _mostrar_avisos_lhopital(f_segura)
+
+        xi = parse_expr_to_float(xi_str, "xi") if xi_str.strip() else (a + b) / 2.0
+        if xi is None:
+            return
+
         valor_exacto = _valor_exacto(expr, x_sym, a, b)
-        resultado, x_vals, f_vals, pesos, contrib, h = _rectangulo(f_np, a, b, n)
+        resultado, x_vals, f_vals, pesos, contrib, h = _rectangulo(f_segura, a, b, n)
         _mostrar_resultados(resultado, valor_exacto, n_dec, x_vals, f_vals, pesos, contrib)
-        st.plotly_chart(_plot_rectangulos(f_np, a, b, n, resultado), use_container_width=True)
-        _tabla_convergencia(_rectangulo, f_np, a, b, n, valor_exacto, n_dec)
+
+        _paso_rectangulo_examen(a, b, n, h, f_vals, resultado, n_dec)
+
+        with st.expander(f"📐 Error de truncamiento (ξ = {_fmt_tex(xi)})", expanded=True):
+            _mostrar_error_trunc("rectangulo", expr, x_sym, a, b, n, xi, n_dec)
+
+        with st.expander("📝 Respuesta lista para examen (formato alumno)", expanded=False):
+            texto = _respuesta_examen_integracion(
+                "rectangulo", expr, x_sym, a, b, n, h,
+                x_vals, f_vals, resultado, xi, n_dec, f_segura, valor_exacto,
+            )
+            st.markdown(texto)
+            st.code(texto, language="markdown")
+
+        st.plotly_chart(_plot_rectangulos(f_segura, a, b, n, resultado), use_container_width=True)
+        _tabla_convergencia(_rectangulo, f_segura, a, b, n, valor_exacto, n_dec)
         st.session_state["int_rect_res"] = resultado
 
 
@@ -329,22 +913,45 @@ def _metodo_trapecio():
         st.latex(r"E_T = -\frac{(b-a)^3}{12\,n^2}\,f''(\xi)")
         st.markdown("**Restriccion de n:** Ninguna.")
 
-    latex, a_str, b_str, n, n_dec, tol = _inputs_comunes("trap")
+    latex, a_str, b_str, n, n_dec, tol, xi_str = _inputs_comunes("trap", con_xi=True)
 
     if st.button("Calcular", key="trap_calc"):
         x_sym = sp.Symbol("x")
-        expr, f_np = parse_latex(latex, [x_sym])
+        expr, _ = parse_latex(latex, [x_sym])
         if expr is None:
             return
         a = parse_expr_to_float(a_str, "a")
         b = parse_expr_to_float(b_str, "b")
         if a is None or b is None:
             return
+
+        f_segura = _FuncionSegura(expr, x_sym)
+        f_segura.registrar_extremos(a, b)
+        _mostrar_avisos_lhopital(f_segura)
+
+        xi = parse_expr_to_float(xi_str, "xi") if xi_str.strip() else (a + b) / 2.0
+        if xi is None:
+            return
+
         valor_exacto = _valor_exacto(expr, x_sym, a, b)
-        resultado, x_vals, f_vals, pesos, contrib, h = _trapecio(f_np, a, b, n)
+        resultado, x_vals, f_vals, pesos, contrib, h = _trapecio(f_segura, a, b, n)
         _mostrar_resultados(resultado, valor_exacto, n_dec, x_vals, f_vals, pesos, contrib)
-        st.plotly_chart(_plot_trapecios(f_np, a, b, n, resultado), use_container_width=True)
-        _tabla_convergencia(_trapecio, f_np, a, b, n, valor_exacto, n_dec)
+
+        _paso_trapecio_examen(a, b, n, h, f_vals, resultado, n_dec)
+
+        with st.expander(f"📐 Error de truncamiento (ξ = {_fmt_tex(xi)})", expanded=True):
+            _mostrar_error_trunc("trapecio", expr, x_sym, a, b, n, xi, n_dec)
+
+        with st.expander("📝 Respuesta lista para examen (formato alumno)", expanded=False):
+            texto = _respuesta_examen_integracion(
+                "trapecio", expr, x_sym, a, b, n, h,
+                x_vals, f_vals, resultado, xi, n_dec, f_segura, valor_exacto,
+            )
+            st.markdown(texto)
+            st.code(texto, language="markdown")
+
+        st.plotly_chart(_plot_trapecios(f_segura, a, b, n, resultado), use_container_width=True)
+        _tabla_convergencia(_trapecio, f_segura, a, b, n, valor_exacto, n_dec)
         st.session_state["int_trap_res"] = resultado
 
 
@@ -361,7 +968,7 @@ def _metodo_simpson13():
         st.latex(r"E = -\frac{(b-a)^5}{180\,n^4}\,f^{(4)}(\xi)")
         st.markdown("**Restriccion de n:** n debe ser **par**.")
 
-    latex, a_str, b_str, n, n_dec, tol = _inputs_comunes("s13")
+    latex, a_str, b_str, n, n_dec, tol, xi_str = _inputs_comunes("s13", con_xi=True)
 
     if n % 2 != 0:
         st.warning(f"Simpson 1/3 requiere n par. Se ajusta n = {n} → {n + 1}")
@@ -369,23 +976,46 @@ def _metodo_simpson13():
 
     if st.button("Calcular", key="s13_calc"):
         x_sym = sp.Symbol("x")
-        expr, f_np = parse_latex(latex, [x_sym])
+        expr, _ = parse_latex(latex, [x_sym])
         if expr is None:
             return
         a = parse_expr_to_float(a_str, "a")
         b = parse_expr_to_float(b_str, "b")
         if a is None or b is None:
             return
+
+        f_segura = _FuncionSegura(expr, x_sym)
+        f_segura.registrar_extremos(a, b)
+        _mostrar_avisos_lhopital(f_segura)
+
+        xi = parse_expr_to_float(xi_str, "xi") if xi_str.strip() else (a + b) / 2.0
+        if xi is None:
+            return
+
         valor_exacto = _valor_exacto(expr, x_sym, a, b)
-        resultado, x_vals, f_vals, pesos, contrib, h = _simpson13(f_np, a, b, n)
+        resultado, x_vals, f_vals, pesos, contrib, h = _simpson13(f_segura, a, b, n)
         _mostrar_resultados(resultado, valor_exacto, n_dec, x_vals, f_vals, pesos, contrib)
-        st.plotly_chart(_plot_simpson(f_np, a, b, n, resultado, "Simpson 1/3"), use_container_width=True)
+
+        _paso_simpson13_examen(a, b, n, h, f_vals, resultado, n_dec)
+
+        with st.expander(f"📐 Error de truncamiento (ξ = {_fmt_tex(xi)})", expanded=True):
+            _mostrar_error_trunc("simpson13", expr, x_sym, a, b, n, xi, n_dec)
+
+        with st.expander("📝 Respuesta lista para examen (formato alumno)", expanded=False):
+            texto = _respuesta_examen_integracion(
+                "simpson13", expr, x_sym, a, b, n, h,
+                x_vals, f_vals, resultado, xi, n_dec, f_segura, valor_exacto,
+            )
+            st.markdown(texto)
+            st.code(texto, language="markdown")
+
+        st.plotly_chart(_plot_simpson(f_segura, a, b, n, resultado, "Simpson 1/3"), use_container_width=True)
 
         def _s13_safe(f_np_, a_, b_, n_):
             n_adj = n_ if n_ % 2 == 0 else n_ + 1
             return _simpson13(f_np_, a_, b_, n_adj)
 
-        _tabla_convergencia(_s13_safe, f_np, a, b, n, valor_exacto, n_dec)
+        _tabla_convergencia(_s13_safe, f_segura, a, b, n, valor_exacto, n_dec)
         st.session_state["int_s13_res"] = resultado
 
 
@@ -402,7 +1032,7 @@ def _metodo_simpson38():
         st.latex(r"E = -\frac{(b-a)^5}{6480\,n^4}\,f^{(4)}(\xi)")
         st.markdown("**Restriccion de n:** n debe ser **multiplo de 3**.")
 
-    latex, a_str, b_str, n, n_dec, tol = _inputs_comunes("s38")
+    latex, a_str, b_str, n, n_dec, tol, xi_str = _inputs_comunes("s38", con_xi=True)
 
     if n % 3 != 0:
         n_adj = round(n / 3) * 3
@@ -413,17 +1043,40 @@ def _metodo_simpson38():
 
     if st.button("Calcular", key="s38_calc"):
         x_sym = sp.Symbol("x")
-        expr, f_np = parse_latex(latex, [x_sym])
+        expr, _ = parse_latex(latex, [x_sym])
         if expr is None:
             return
         a = parse_expr_to_float(a_str, "a")
         b = parse_expr_to_float(b_str, "b")
         if a is None or b is None:
             return
+
+        f_segura = _FuncionSegura(expr, x_sym)
+        f_segura.registrar_extremos(a, b)
+        _mostrar_avisos_lhopital(f_segura)
+
+        xi = parse_expr_to_float(xi_str, "xi") if xi_str.strip() else (a + b) / 2.0
+        if xi is None:
+            return
+
         valor_exacto = _valor_exacto(expr, x_sym, a, b)
-        resultado, x_vals, f_vals, pesos, contrib, h = _simpson38(f_np, a, b, n)
+        resultado, x_vals, f_vals, pesos, contrib, h = _simpson38(f_segura, a, b, n)
         _mostrar_resultados(resultado, valor_exacto, n_dec, x_vals, f_vals, pesos, contrib)
-        st.plotly_chart(_plot_simpson(f_np, a, b, n, resultado, "Simpson 3/8"), use_container_width=True)
+
+        _paso_simpson38_examen(a, b, n, h, f_vals, resultado, n_dec)
+
+        with st.expander(f"📐 Error de truncamiento (ξ = {_fmt_tex(xi)})", expanded=True):
+            _mostrar_error_trunc("simpson38", expr, x_sym, a, b, n, xi, n_dec)
+
+        with st.expander("📝 Respuesta lista para examen (formato alumno)", expanded=False):
+            texto = _respuesta_examen_integracion(
+                "simpson38", expr, x_sym, a, b, n, h,
+                x_vals, f_vals, resultado, xi, n_dec, f_segura, valor_exacto,
+            )
+            st.markdown(texto)
+            st.code(texto, language="markdown")
+
+        st.plotly_chart(_plot_simpson(f_segura, a, b, n, resultado, "Simpson 3/8"), use_container_width=True)
 
         def _s38_safe(f_np_, a_, b_, n_):
             n_adj = round(n_ / 3) * 3
@@ -431,7 +1084,7 @@ def _metodo_simpson38():
                 n_adj = 3
             return _simpson38(f_np_, a_, b_, n_adj)
 
-        _tabla_convergencia(_s38_safe, f_np, a, b, n, valor_exacto, n_dec)
+        _tabla_convergencia(_s38_safe, f_segura, a, b, n, valor_exacto, n_dec)
         st.session_state["int_s38_res"] = resultado
 
 
@@ -442,17 +1095,22 @@ def _metodo_simpson38():
 def _comparacion():
     st.subheader("Comparacion de Metodos")
 
-    latex, a_str, b_str, n, n_dec, tol = _inputs_comunes("int_comp")
+    latex, a_str, b_str, n, n_dec, tol, _ = _inputs_comunes("int_comp")
 
     if st.button("Comparar", key="int_comp_calc"):
         x_sym = sp.Symbol("x")
-        expr, f_np = parse_latex(latex, [x_sym])
+        expr, _f_np = parse_latex(latex, [x_sym])
         if expr is None:
             return
         a = parse_expr_to_float(a_str, "a")
         b = parse_expr_to_float(b_str, "b")
         if a is None or b is None:
             return
+
+        f_np = _FuncionSegura(expr, x_sym)
+        f_np.registrar_extremos(a, b)
+        _mostrar_avisos_lhopital(f_np)
+
         valor_exacto = _valor_exacto(expr, x_sym, a, b)
 
         # Ajustar n para cada metodo
